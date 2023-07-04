@@ -1,5 +1,879 @@
 
-测试需要达到什么样子的结果
-顶点buffer的不同格式指的是什么
-divisor_is_o
-exp pos 测试psize_value， layer_value什么意思,从哪里来的
+## Mesa
+
+ ST_DEBUG
+tgsi
+draw
+
+
+#ifdef DEBUG
+extern int ST_DEBUG;
+#define DBSTR(x) x
+#else
+#define ST_DEBUG 0
+#define DBSTR(x) ""
+#endif
+
+
+
+
+st_create_context
+	---> st_debug_init
+		----> debug_get_option_st_debug
+			----> debug_get_flags_option
+				---> os_get_option   -> getenv()
+special case for "help"
+
+uint64_t
+debug_get_flags_option(const char *name,
+                       const struct debug_named_value *flags,
+                       uint64_t dfault)
+{  
+   uint64_t result;
+   const char *str;        variable str                 
+   const struct debug_name                              
+   unsigned namealign = 0; Type: const char *           
+                           Passed as __s1               
+   str = os_get_option(nam                              
+   if (!str)               // In debug_get_flags_option 
+      result = dfault;     const char *str              
+   else if (!util_strcmp(str, "help")) {
+      result = dfault;
+      _debug_printf("%s: help for %s:\n", __FUNCTION__, name);
+      for (; flags->name; ++flags)
+         namealign = MAX2(namealign, strlen(flags->name));
+      for (flags = orig; flags->name; ++flags)
+         _debug_printf("| %*s [0x%0*"PRIx64"]%s%s\n", namealign, flags->name,
+                      (int)sizeof(uint64_t)*CHAR_BIT/4, flags->value,
+                      flags->desc ? " " : "", flags->desc ? flags->desc : "");
+   }
+   else {
+      result = 0;
+      while (flags->name) {
+     if (str_has_option(str, flags->name))
+        result |= flags->value;
+     ++flags;
+      }
+   }
+   
+   if (debug_get_option_should_print()) {
+      if (str) {
+         debug_printf("%s: %s = 0x%"PRIx64" (%s)\n",
+                      __FUNCTION__, name, result, str);
+      } else {
+         debug_printf("%s: %s = 0x%"PRIx64"\n", __FUNCTION__, name, result);
+      }
+   }
+   
+   return result;
+}
+
+
+static const struct debug_named_value st_debug_flags[] = {
+   { "mesa",     DEBUG_MESA, NULL },
+   { "tgsi",     DEBUG_TGSI, NULL },
+   { "constants",DEBUG_CONSTANTS, NULL },
+   { "pipe",     DEBUG_PIPE, NULL },
+   { "tex",      DEBUG_TEX, NULL },
+   { "fallback", DEBUG_FALLBACK, NULL },
+   { "screen",   DEBUG_SCREEN, NULL },
+   { "query",    DEBUG_QUERY, NULL },
+   { "draw",     DEBUG_DRAW, NULL },
+   { "buffer",   DEBUG_BUFFER, NULL },
+   { "wf",       DEBUG_WIREFRAME, NULL },
+   { "precompile",  DEBUG_PRECOMPILE, NULL },
+   { "gremedy",  DEBUG_GREMEDY, "Enable GREMEDY debug extensions" },
+   { "noreadpixcache", DEBUG_NOREADPIXCACHE, NULL },
+   DEBUG_NAMED_VALUE_END
+};
+
+# GALLIVM_DEBUG
+
+static const struct debug_named_value lp_bld_debug_flags[] = {
+   { "tgsi",   GALLIVM_DEBUG_TGSI, NULL },
+   { "ir",     GALLIVM_DEBUG_IR, NULL },
+   { "asm",    GALLIVM_DEBUG_ASM, NULL },
+   { "perf",   GALLIVM_DEBUG_PERF, NULL },
+   { "gc",     GALLIVM_DEBUG_GC, NULL },
+   { "dumpbc", GALLIVM_DEBUG_DUMP_BC, NULL },
+   DEBUG_NAMED_VALUE_END
+};
+
+
+```c++
+void
+os_log_message(const char *message)
+{
+   /* If the GALLIUM_LOG_FILE environment variable is set to a valid filename,
+    * write all messages to that file.
+    */
+   static FILE *fout = NULL;
+
+   if (!fout) {
+#ifdef DEBUG            
+      /* one-time init */
+      const char *filename = os_get_option("GALLIUM_LOG_FILE");
+      if (filename) {
+         const char *mode = "w";
+         if (filename[0] == '+') {
+            /* If the filename is prefixed with '+' then open the file for
+             * appending instead of normal writing.
+             */
+            mode = "a";
+            filename++; /* skip the '+' */
+         }
+         fout = fopen(filename, mode);
+      }
+#endif
+      if (!fout)
+         fout = stderr;
+   }
+
+#if defined(PIPE_SUBSYSTEM_WINDOWS_USER)
+   OutputDebugStringA(message);
+   if(GetConsoleWindow() && !IsDebuggerPresent()) {
+      fflush(stdout);
+      fputs(message, fout);
+      fflush(fout);
+   }
+   else if (fout != stderr) {
+      fputs(message, fout);
+      fflush(fout);
+   }
+#else /* !PIPE_SUBSYSTEM_WINDOWS */
+   fflush(stdout);
+   fputs(message, fout);
+   fflush(fout);Gallium environment variables 
+   fflush (message)
+
+#endif
+}
+
+```
+
+## Gallium environment variables
+
+
+
+Gallium environment variables 
+fflush (message)
+
+
+
+
+
+
+
+
+static void
+draw_llvm_generate(struct draw_llvm *llvm, struct draw_llvm_variant *variant)
+{
+   struct gallivm_state *gallivm = variant->gallivm;
+   LLVMContextRef context = gallivm->context;
+   LLVMTypeRef int32_type = LLVMInt32TypeInContext(context);
+   LLVMTypeRef arg_types[11];
+   unsigned num_arg_types = ARRAY_SIZE(arg_types);
+   LLVMTypeRef func_type;
+   LLVMValueRef context_ptr;
+   LLVMBasicBlockRef block;
+   LLVMBuilderRef builder;
+   char func_name[64];
+   struct lp_type vs_type;
+   LLVMValueRef count, fetch_elts, start_or_maxelt;
+   LLVMValueRef vertex_id_offset, start_instance;
+   LLVMValueRef stride, step, io_itr;
+   LLVMValueRef ind_vec, start_vec, have_elts, fetch_max, tmp;
+   LLVMValueRef io_ptr, vbuffers_ptr, vb_ptr;
+   LLVMValueRef vb_stride[PIPE_MAX_ATTRIBS];
+   LLVMValueRef map_ptr[PIPE_MAX_ATTRIBS];
+   LLVMValueRef buffer_size_adj[PIPE_MAX_ATTRIBS];
+   LLVMValueRef instance_index[PIPE_MAX_ATTRIBS];
+   LLVMValueRef fake_buf_ptr, fake_buf;
+
+   struct draw_context *draw = llvm->draw;
+   const struct tgsi_shader_info *vs_info = &draw->vs.vertex_shader->info;
+   unsigned i, j;
+   struct lp_build_context bld, blduivec;
+   struct lp_build_loop_state lp_loop;
+   struct lp_build_if_state if_ctx;
+   const int vector_length = lp_native_vector_width / 32;
+   LLVMValueRef outputs[PIPE_MAX_SHADER_OUTPUTS][TGSI_NUM_CHANNELS];
+   struct lp_build_sampler_soa *sampler = 0;
+   LLVMValueRef ret, clipmask_bool_ptr;
+   struct draw_llvm_variant_key *key = &variant->key;
+   /* If geometry shader is present we need to skip both the viewport
+    * transformation and clipping otherwise the inputs to the geometry
+    * shader will be incorrect.
+    * The code can't handle vp transform when vs writes vp index neither
+    * (though this would be fixable here, but couldn't just broadcast
+    * the values).
+    */
+   const boolean bypass_viewport = key->has_gs || key->bypass_viewport ||
+                                   vs_info->writes_viewport_index;
+   const boolean enable_cliptest = !key->has_gs && (key->clip_xy ||
+                                                    key->clip_z ||
+                                                    key->clip_user ||
+                                                    key->need_edgeflags);
+   LLVMValueRef variant_func;
+   const unsigned pos = draw->vs.position_output;
+   const unsigned cv = draw->vs.clipvertex_output;
+   boolean have_clipdist = FALSE;
+   struct lp_bld_tgsi_system_values system_values;
+
+   memset(&system_values, 0, sizeof(system_values));
+
+   util_snprintf(func_name, sizeof(func_name), "draw_llvm_vs_variant%u",
+                 variant->shader->variants_cached);
+
+   i = 0;
+   arg_types[i++] = get_context_ptr_type(variant);       /* context */
+   arg_types[i++] = get_vertex_header_ptr_type(variant); /* vertex_header */
+   arg_types[i++] = get_buffer_ptr_type(variant);        /* vbuffers */
+   arg_types[i++] = int32_type;                          /* count */
+   arg_types[i++] = int32_type;                          /* start/fetch_elt_max */
+   arg_types[i++] = int32_type;                          /* stride */
+   arg_types[i++] = get_vb_ptr_type(variant);            /* pipe_vertex_buffer's */
+   arg_types[i++] = int32_type;                          /* instance_id */
+   arg_types[i++] = int32_type;                          /* vertex_id_offset */
+   arg_types[i++] = int32_type;                          /* start_instance */
+   arg_types[i++] = LLVMPointerType(int32_type, 0);      /* fetch_elts  */
+
+   func_type = LLVMFunctionType(LLVMInt8TypeInContext(context),
+                                arg_types, num_arg_types, 0);
+
+   variant_func = LLVMAddFunction(gallivm->module, func_name, func_type);
+   variant->function = variant_func;
+
+   LLVMSetFunctionCallConv(variant_func, LLVMCCallConv);
+   for (i = 0; i < num_arg_types; ++i)
+      if (LLVMGetTypeKind(arg_types[i]) == LLVMPointerTypeKind)
+         lp_add_function_attr(variant_func, i + 1, LP_FUNC_ATTR_NOALIAS);
+
+   context_ptr               = LLVMGetParam(variant_func, 0);
+   io_ptr                    = LLVMGetParam(variant_func, 1);
+   vbuffers_ptr              = LLVMGetParam(variant_func, 2);
+   count                     = LLVMGetParam(variant_func, 3);
+   /*
+    * XXX: the maxelt part is unused. Not really useful, since we cannot
+    * get index buffer overflows due to vsplit (which provides its own
+    * elts buffer, with a different size than what's passed in here).
+    */
+   start_or_maxelt           = LLVMGetParam(variant_func, 4);
+   /*
+    * XXX: stride is actually unused. The stride we use is strictly calculated
+    * from the number of outputs (including the draw_extra outputs).
+    * Should probably fix some day (we need a new vs just because of extra
+    * outputs which the generated vs won't touch).
+    */
+   stride                    = LLVMGetParam(variant_func, 5);
+   vb_ptr                    = LLVMGetParam(variant_func, 6);
+   system_values.instance_id = LLVMGetParam(variant_func, 7);
+   vertex_id_offset          = LLVMGetParam(variant_func, 8);
+   start_instance            = LLVMGetParam(variant_func, 9);
+   fetch_elts                = LLVMGetParam(variant_func, 10);
+
+   lp_build_name(context_ptr, "context");
+   lp_build_name(io_ptr, "io");
+   lp_build_name(vbuffers_ptr, "vbuffers");
+   lp_build_name(count, "count");
+   lp_build_name(start_or_maxelt, "start_or_maxelt");
+   lp_build_name(stride, "stride");
+   lp_build_name(vb_ptr, "vb");
+   lp_build_name(system_values.instance_id, "instance_id");
+   lp_build_name(vertex_id_offset, "vertex_id_offset");
+   lp_build_name(start_instance, "start_instance");
+   lp_build_name(fetch_elts, "fetch_elts");
+
+   /*
+    * Function body
+    */
+
+   block = LLVMAppendBasicBlockInContext(gallivm->context, variant_func, "entry");
+   builder = gallivm->builder;
+   LLVMPositionBuilderAtEnd(builder, block);
+
+   memset(&vs_type, 0, sizeof vs_type);
+   vs_type.floating = TRUE; /* floating point values */
+   vs_type.sign = TRUE;     /* values are signed */
+   vs_type.norm = FALSE;    /* values are not limited to [0,1] or [-1,1] */
+   vs_type.width = 32;      /* 32-bit float */
+   vs_type.length = vector_length;
+
+   lp_build_context_init(&bld, gallivm, lp_type_uint(32));
+   lp_build_context_init(&blduivec, gallivm, lp_uint_type(vs_type));
+
+   /* hold temporary "bool" clipmask */
+   clipmask_bool_ptr = lp_build_alloca(gallivm, blduivec.vec_type, "");
+
+   fake_buf = lp_build_alloca_undef(gallivm,
+                 LLVMVectorType(LLVMInt64TypeInContext(context), 4), "");
+   fake_buf = LLVMBuildBitCast(builder, fake_buf,
+                 LLVMPointerType(LLVMInt8TypeInContext(context), 0), "");
+   fake_buf_ptr = LLVMBuildGEP(builder, fake_buf, &bld.zero, 1, "");
+
+   /* code generated texture sampling */
+   sampler = draw_llvm_sampler_soa_create(draw_llvm_variant_key_samplers(key));
+
+   step = lp_build_const_int32(gallivm, vector_length);
+
+   ind_vec = blduivec.undef;
+   for (i = 0; i < vs_type.length; i++) {
+      LLVMValueRef index = lp_build_const_int32(gallivm, i);
+      ind_vec = LLVMBuildInsertElement(builder, ind_vec, index, index, "");
+   }
+
+   have_elts = LLVMBuildICmp(builder, LLVMIntNE,
+                             LLVMConstPointerNull(arg_types[10]), fetch_elts, "");
+
+   fetch_max = LLVMBuildSub(builder, count, bld.one, "fetch_max");
+   fetch_max = lp_build_broadcast_scalar(&blduivec, fetch_max);
+   /*
+    * Only needed for non-indexed path.
+    */
+   start_vec = lp_build_broadcast_scalar(&blduivec, start_or_maxelt);
+
+   /*
+    * Pre-calculate everything which is constant per shader invocation.
+    */
+   for (j = 0; j < key->nr_vertex_elements; ++j) {
+      LLVMValueRef vb_buffer_offset, buffer_size, temp_ptr;
+      LLVMValueRef vb_info, vbuffer_ptr, buf_offset, ofbit;
+      struct pipe_vertex_element *velem = &key->vertex_element[j];
+      LLVMValueRef vb_index =
+         lp_build_const_int32(gallivm, velem->vertex_buffer_index);
+      LLVMValueRef bsize = lp_build_const_int32(gallivm,
+                                                util_format_get_blocksize(velem->src_format));
+      LLVMValueRef src_offset = lp_build_const_int32(gallivm,
+                                                     velem->src_offset);
+      struct lp_build_if_state if_ctx;
+
+      if (velem->src_format != PIPE_FORMAT_NONE) {
+         vbuffer_ptr = LLVMBuildGEP(builder, vbuffers_ptr, &vb_index, 1, "");
+         vb_info = LLVMBuildGEP(builder, vb_ptr, &vb_index, 1, "");
+         vb_stride[j] = draw_jit_vbuffer_stride(gallivm, vb_info);
+         vb_stride[j] = LLVMBuildZExt(gallivm->builder, vb_stride[j],
+                                      LLVMInt32TypeInContext(context), "");
+         vb_buffer_offset = draw_jit_vbuffer_offset(gallivm, vb_info);
+         map_ptr[j] = draw_jit_dvbuffer_map(gallivm, vbuffer_ptr);
+         buffer_size = draw_jit_dvbuffer_size(gallivm, vbuffer_ptr);
+
+         ofbit = NULL;
+         /*
+          * We'll set buffer_size_adj to zero if we have of, so it will
+          * always overflow later automatically without having to keep ofbit.
+          * Overflows (with normal wraparound) doing the actual offset
+          * calculation should be ok, just not for the buffer size calc.
+          * It would also be possible to detect such overflows and return
+          * zeros if that happens, but this would be more complex.
+          */
+         buf_offset = lp_build_add(&bld, vb_buffer_offset, src_offset);
+         tmp = lp_build_sub(&bld, bsize, bld.one);
+         buffer_size_adj[j] = lp_build_usub_overflow(gallivm, buffer_size, tmp,
+                                                     &ofbit);
+         buffer_size_adj[j] = lp_build_usub_overflow(gallivm, buffer_size_adj[j],
+                                                     buf_offset, &ofbit);
+
+         /*
+          * We can't easily set fake vertex buffers outside the generated code.
+          * Hence, set fake vertex buffers here instead basically, so fetch
+          * code can always fetch using offset 0, eliminating all control flow
+          * inside the main loop.
+          * (Alternatively, could have control flow per vector skipping fetch
+          * if ofbit is true.)
+          */
+         if (velem->instance_divisor) {
+            /*
+             * Index is equal to the start instance plus the number of current
+             * instance divided by the divisor. In this case we compute it as:
+             * index = start_instance + (instance_id  / divisor).
+             * Note we could actually do the fetch here, outside the loop -
+             * it's all constant, hopefully llvm recognizes this.
+             */
+            LLVMValueRef current_instance;
+            current_instance = LLVMBuildUDiv(builder, system_values.instance_id,
+                                             lp_build_const_int32(gallivm,
+                                                                  velem->instance_divisor),
+                                             "instance_divisor");
+            instance_index[j] = lp_build_uadd_overflow(gallivm, start_instance,
+                                                       current_instance, &ofbit);
+         }
+
+         buffer_size_adj[j] = LLVMBuildSelect(builder, ofbit, bld.zero,
+                                              buffer_size_adj[j], "");
+
+         temp_ptr = lp_build_alloca_undef(gallivm,
+                       LLVMPointerType(LLVMInt8TypeInContext(context), 0), "");
+
+         lp_build_if(&if_ctx, gallivm, ofbit);
+         {
+            LLVMBuildStore(builder, fake_buf_ptr, temp_ptr);
+         }
+         lp_build_else(&if_ctx);
+         {
+            map_ptr[j] = LLVMBuildGEP(builder, map_ptr[j], &buf_offset, 1, "");
+            LLVMBuildStore(builder, map_ptr[j], temp_ptr);
+         }
+         lp_build_endif(&if_ctx);
+         map_ptr[j] = LLVMBuildLoad(builder, temp_ptr, "map_ptr");
+
+         if (0) {
+            lp_build_printf(gallivm, "velem %d, vbuf index = %u, vb_stride = %u\n",
+                            lp_build_const_int32(gallivm, j),
+                            vb_index, vb_stride[j]);
+            lp_build_printf(gallivm,
+                            "   vb_buffer_offset = %u, src_offset = %u, buf_offset = %u\n",
+                            vb_buffer_offset, src_offset, buf_offset);
+            lp_build_printf(gallivm, "   buffer size = %u, blocksize = %u\n",
+                            buffer_size, bsize);
+            lp_build_printf(gallivm, "   instance_id = %u\n", system_values.instance_id);
+         }
+      }
+   }
+
+   lp_build_loop_begin(&lp_loop, gallivm, bld.zero);
+   {
+      LLVMValueRef inputs[PIPE_MAX_SHADER_INPUTS][TGSI_NUM_CHANNELS];
+      LLVMValueRef io;
+      LLVMValueRef clipmask;   /* holds the clipmask value */
+      LLVMValueRef true_index_array, index_store;
+      const LLVMValueRef (*ptr_aos)[TGSI_NUM_CHANNELS];
+
+      io_itr = lp_loop.counter;
+
+      io = LLVMBuildGEP(builder, io_ptr, &io_itr, 1, "");
+#if DEBUG_STORE
+      lp_build_printf(gallivm, " --- io %d = %p, loop counter %d\n",
+                      io_itr, io, lp_loop.counter);
+#endif
+
+      true_index_array = lp_build_broadcast_scalar(&blduivec, lp_loop.counter);
+      true_index_array = LLVMBuildAdd(builder, true_index_array, ind_vec, "");
+
+      /*
+       * Limit indices to fetch_max, otherwise might try to access indices
+       * beyond index buffer (or rather vsplit elt buffer) size.
+       * Could probably safely (?) skip this for non-indexed draws and
+       * simplify things minimally (by removing it could combine the ind_vec
+       * and start_vec adds). I think the only effect for non-indexed draws will
+       * be that for the invalid elements they will be all fetched from the
+       * same location as the last valid one, but noone should really care.
+       */
+      true_index_array = lp_build_min(&blduivec, true_index_array, fetch_max);
+
+      index_store = lp_build_alloca_undef(gallivm, blduivec.vec_type, "index_store");
+
+      lp_build_if(&if_ctx, gallivm, have_elts);
+      {
+         /*
+          * Note: you'd expect some comparison/clamp against fetch_elt_max
+          * here.
+          * There used to be one here but it was incorrect: overflow was
+          * detected if index > fetch_elt_max - but the correct condition
+          * would be index >= fetch_elt_max (since this is just size of elts
+          * buffer / element size).
+          * Using the correct condition however will cause failures - due to
+          * vsplit/vcache code which rebases indices. So, as an example, if
+          * fetch_elt_max is just 1 and fetch_count 2, vsplit cache will
+          * replace all invalid indices with 0 - which in case of elt_bias
+          * not being zero will get a different fetch index than the valid
+          * index 0. So, just rely on vsplit code preventing out-of-bounds
+          * fetches. This is also why it's safe to do elts fetch even if there
+          * was no index buffer bound - the real buffer is never seen here, at
+          * least not if there are index buffer overflows...
+          */
+
+         /*
+          * XXX should not have to do this, as scale can be handled
+          * natively by loads (hits asserts though).
+          */
+         tmp = lp_build_shl_imm(&blduivec, true_index_array, 2);
+         fetch_elts = LLVMBuildBitCast(builder, fetch_elts,
+                                       LLVMPointerType(LLVMInt8TypeInContext(context),
+                                                       0), "");
+         tmp = lp_build_gather(gallivm, vs_type.length,
+                               32, bld.type, TRUE,
+                               fetch_elts, tmp, FALSE);
+         LLVMBuildStore(builder, tmp, index_store);
+      }
+      lp_build_else(&if_ctx);
+      {
+         tmp = LLVMBuildAdd(builder, true_index_array, start_vec, "");
+         LLVMBuildStore(builder, tmp, index_store);
+      }
+      lp_build_endif(&if_ctx);
+
+      true_index_array = LLVMBuildLoad(builder, index_store, "");
+
+      for (j = 0; j < key->nr_vertex_elements; ++j) {
+         struct pipe_vertex_element *velem = &key->vertex_element[j];
+         const struct util_format_description *format_desc =
+            util_format_description(velem->src_format);
+
+         if (format_desc->format == PIPE_FORMAT_NONE) {
+            for (i = 0; i < TGSI_NUM_CHANNELS; i++) {
+               inputs[j][i] = lp_build_zero(gallivm, vs_type);
+            }
+         }
+         else if (velem->instance_divisor) {
+            fetch_instanced(gallivm, format_desc, vs_type,
+                            vb_stride[j], map_ptr[j],
+                            buffer_size_adj[j],
+                            inputs[j], instance_index[j]);
+         }
+         else {
+            fetch_vector(gallivm, format_desc, vs_type,
+                         vb_stride[j], map_ptr[j],
+                         buffer_size_adj[j],
+                         inputs[j], true_index_array);
+         }
+      }
+
+      /* In the paths with elts vertex id has to be unaffected by the
+       * index bias and because indices inside our elements array have
+       * already had index bias applied we need to subtract it here to
+       * get back to the original index.
+       * in the linear paths vertex id has to be unaffected by the
+       * original start index and because we abuse the 'start' variable
+       * to either represent the actual start index or the index at which
+       * the primitive was split (we split rendering into chunks of at
+       * most 4095-vertices) we need to back out the original start
+       * index out of our vertex id here.
+       */
+      system_values.basevertex = lp_build_broadcast_scalar(&blduivec,
+                                                           vertex_id_offset);
+      system_values.vertex_id = true_index_array;
+      system_values.vertex_id_nobase = LLVMBuildSub(builder, true_index_array,
+                                                      system_values.basevertex, "");
+
+      ptr_aos = (const LLVMValueRef (*)[TGSI_NUM_CHANNELS]) inputs;
+      generate_vs(variant,
+                  builder,
+                  vs_type,
+                  outputs,
+                  ptr_aos,
+                  &system_values,
+                  context_ptr,
+                  sampler,
+                  key->clamp_vertex_color);
+
+      if (pos != -1 && cv != -1) {
+         /* store original positions in clip before further manipulation */
+         store_clip(gallivm, vs_type, io, outputs, pos);
+
+         /* do cliptest */
+         if (enable_cliptest) {
+            LLVMValueRef temp = LLVMBuildLoad(builder, clipmask_bool_ptr, "");
+            /* allocate clipmask, assign it integer type */
+            clipmask = generate_clipmask(llvm,
+                                         gallivm,
+                                         vs_type,
+                                         outputs,
+                                         key,
+                                         context_ptr, &have_clipdist);
+            temp = LLVMBuildOr(builder, clipmask, temp, "");
+            /* store temporary clipping boolean value */
+            LLVMBuildStore(builder, temp, clipmask_bool_ptr);
+         }
+         else {
+            clipmask = blduivec.zero;
+         }
+
+         /* do viewport mapping */
+         if (!bypass_viewport) {
+            generate_viewport(variant, builder, vs_type, outputs, context_ptr);
+         }
+      }
+      else {
+         clipmask = blduivec.zero;
+      }
+
+      /* store clipmask in vertex header,
+       * original positions in clip
+       * and transformed positions in data
+       */
+      convert_to_aos(gallivm, io, NULL, outputs, clipmask,
+                     vs_info->num_outputs, vs_type,
+                     enable_cliptest && key->need_edgeflags);
+   }
+   lp_build_loop_end_cond(&lp_loop, count, step, LLVMIntUGE);
+
+   sampler->destroy(sampler);
+
+   /* return clipping boolean value for function */
+   ret = clipmask_booli8(gallivm, vs_type, clipmask_bool_ptr,
+                         enable_cliptest && key->need_edgeflags);
+
+   LLVMBuildRet(builder, ret);
+
+   gallivm_verify_function(gallivm, variant_func);
+}
+
+
+\VERT
+PROPERTY NEXT_SHADER FRAG
+DCL IN[0]
+DCL IN[1]
+DCL IN[2]
+DCL OUT[0], POSITION
+DCL OUT[1], COLOR
+DCL OUT[2], GENERIC[0]
+  0: MOV OUT[0], IN[0]
+  1: MOV OUT[1], IN[1]
+  2: MOV OUT[2], IN[2]
+  3: END
+clamp_vertex_color = 0
+clip_xy = 1
+clip_z = 1
+clip_user = 0
+bypass_viewport = 0
+clip_halfz = 0
+need_edgeflags = 0
+has_gs = 0
+ucp_enable = 0
+vertex_element[0].src_offset = 0
+vertex_element[0].instance_divisor = 0
+vertex_element[0].vertex_buffer_index = 0
+vertex_element[0].src_format = PIPE_FORMAT_R32G32B32_FLOAT
+vertex_element[1].src_offset = 12
+vertex_element[1].instance_divisor = 0
+vertex_element[1].vertex_buffer_index = 0
+vertex_element[1].src_format = PIPE_FORMAT_R32G32B32A32_FLOAT
+vertex_element[2].src_offset = 28
+vertex_element[2].instance_divisor = 0
+vertex_element[2].vertex_buffer_index = 0
+vertex_element[2].src_format = PIPE_FORMAT_R32G32_FLOAT
+
+; Function Attrs: nounwind readnone speculatable
+declare { i32, i1 } @llvm.usub.with.overflow.i32(i32, i32) #0
+
+; Function Attrs: argmemonly nounwind readonly
+declare <8 x i32> @llvm.x86.avx2.gather.d.d.256(<8 x i32>, i8*, <8 x i32>, <8 x i32>, i8) #1
+
+; Function Attrs: nounwind readnone speculatable
+declare <8 x float> @llvm.fmuladd.v8f32(<8 x float>, <8 x float>, <8 x float>) #0
+
+define i8 @draw_llvm_vs_variant0({ [16 x float*], [16 x i32], [14 x [4 x float]]*, float*, [128 x { i32, i32, i32, i32, i32, i8*, [16 x i32], [16 x i32], [16 x i32] }], [32 x { float, float, float, [4 x float] }] }* noalias %context, { i32, [4 x float], [3 x [4 x float]] }* noalias %io, { i8*, i32 }* noalias %vbuffers, i32 %count, i32 %start_or_maxelt, i32 %stride, { i16, i8, i32, i8* }* noalias %vb, i32 %instance_id, i32 %vertex_id_offset, i32 %start_instance, i32* noalias %fetch_elts) {
+entry:
+  %output46 = alloca <8 x float>
+  %output45 = alloca <8 x float>
+  %output44 = alloca <8 x float>
+  %output43 = alloca <8 x float>
+  %output42 = alloca <8 x float>
+  %output41 = alloca <8 x float>
+  %output40 = alloca <8 x float>
+  %output39 = alloca <8 x float>
+  %output38 = alloca <8 x float>
+  %output37 = alloca <8 x float>
+  %output36 = alloca <8 x float>
+  %output = alloca <8 x float>
+  %looplimiter = alloca i32
+  %index_store = alloca <8 x i32>
+  %loop_counter = alloca i32
+  %0 = alloca i8*
+  %1 = alloca i8*
+  %2 = alloca i8*
+  %3 = alloca <4 x i64>
+  %4 = alloca <8 x i32>
+  store <8 x i32> zeroinitializer, <8 x i32>* %4
+  %5 = bitcast <4 x i64>* %3 to i8*
+  %6 = getelementptr i8, i8* %5, i32 0
+  %7 = icmp ne i32* null, %fetch_elts
+  %fetch_max = sub i32 %count, 1
+  %8 = insertelement <8 x i32> undef, i32 %fetch_max, i32 0
+  %9 = shufflevector <8 x i32> %8, <8 x i32> undef, <8 x i32> zeroinitializer
+  %10 = insertelement <8 x i32> undef, i32 %start_or_maxelt, i32 0
+  %11 = shufflevector <8 x i32> %10, <8 x i32> undef, <8 x i32> zeroinitializer
+  %12 = getelementptr { i8*, i32 }, { i8*, i32 }* %vbuffers, i32 0
+  %13 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %vb, i32 0
+  %.stride_ptr = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %13, i32 0, i32 0
+  %.stride = load i16, i16* %.stride_ptr
+  %14 = zext i16 %.stride to i32
+  %.buffer_offset_ptr = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %13, i32 0, i32 2
+  %.buffer_offset = load i32, i32* %.buffer_offset_ptr
+  %.map_ptr = getelementptr { i8*, i32 }, { i8*, i32 }* %12, i32 0, i32 0
+  %.map = load i8*, i8** %.map_ptr
+  %.size_ptr = getelementptr { i8*, i32 }, { i8*, i32 }* %12, i32 0, i32 1
+  %.size = load i32, i32* %.size_ptr
+  %15 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %.size, i32 11) #2
+  %16 = extractvalue { i32, i1 } %15, 1
+  %17 = extractvalue { i32, i1 } %15, 0
+  %18 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %17, i32 %.buffer_offset) #2
+  %19 = extractvalue { i32, i1 } %18, 1
+  %20 = or i1 %16, %19
+  %21 = extractvalue { i32, i1 } %18, 0
+  %22 = select i1 %20, i32 0, i32 %21
+  br i1 %20, label %if-true-block, label %if-false-block
+
+if-true-block:                                    ; preds = %entry
+  store i8* %6, i8** %2
+  br label %endif-block
+
+if-false-block:                                   ; preds = %entry
+  %23 = getelementptr i8, i8* %.map, i32 %.buffer_offset
+  store i8* %23, i8** %2
+  br label %endif-block
+
+endif-block:                                      ; preds = %if-false-block, %if-true-block
+  %map_ptr = load i8*, i8** %2
+  %24 = getelementptr { i8*, i32 }, { i8*, i32 }* %vbuffers, i32 0
+  %25 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %vb, i32 0
+  %.stride_ptr1 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %25, i32 0, i32 0
+  %.stride2 = load i16, i16* %.stride_ptr1
+  %26 = zext i16 %.stride2 to i32
+  %.buffer_offset_ptr3 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %25, i32 0, i32 2
+  %.buffer_offset4 = load i32, i32* %.buffer_offset_ptr3
+  %.map_ptr5 = getelementptr { i8*, i32 }, { i8*, i32 }* %24, i32 0, i32 0
+  %.map6 = load i8*, i8** %.map_ptr5
+  %.size_ptr7 = getelementptr { i8*, i32 }, { i8*, i32 }* %24, i32 0, i32 1
+  %.size8 = load i32, i32* %.size_ptr7
+  %27 = add i32 %.buffer_offset4, 12
+  %28 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %.size8, i32 15) #2
+  %29 = extractvalue { i32, i1 } %28, 1
+  %30 = extractvalue { i32, i1 } %28, 0
+  %31 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %30, i32 %27) #2
+  %32 = extractvalue { i32, i1 } %31, 1
+  %33 = or i1 %29, %32
+  %34 = extractvalue { i32, i1 } %31, 0
+  %35 = select i1 %33, i32 0, i32 %34
+  br i1 %33, label %if-true-block10, label %if-false-block11
+
+if-true-block10:                                  ; preds = %endif-block
+  store i8* %6, i8** %1
+  br label %endif-block9
+
+if-false-block11:                                 ; preds = %endif-block
+  %36 = getelementptr i8, i8* %.map6, i32 %27
+  store i8* %36, i8** %1
+  br label %endif-block9
+
+endif-block9:                                     ; preds = %if-false-block11, %if-true-block10
+  %map_ptr12 = load i8*, i8** %1
+  %37 = getelementptr { i8*, i32 }, { i8*, i32 }* %vbuffers, i32 0
+  %38 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %vb, i32 0
+  %.stride_ptr13 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %38, i32 0, i32 0
+  %.stride14 = load i16, i16* %.stride_ptr13
+  %39 = zext i16 %.stride14 to i32
+  %.buffer_offset_ptr15 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %38, i32 0, i32 2
+  %.buffer_offset16 = load i32, i32* %.buffer_offset_ptr15
+  %.map_ptr17 = getelementptr { i8*, i32 }, { i8*, i32 }* %37, i32 0, i32 0
+  %.map18 = load i8*, i8** %.map_ptr17
+  %.size_ptr19 = getelementptr { i8*, i32 }, { i8*, i32 }* %37, i32 0, i32 1
+  %.size20 = load i32, i32* %.size_ptr19
+  %40 = add i32 %.buffer_offset16, 28
+  %41 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %.size20, i32 7) #2
+  %42 = extractvalue { i32, i1 } %41, 1
+  %43 = extractvalue { i32, i1 } %41, 0
+  %44 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %43, i32 %40) #2
+  %45 = extractvalue { i32, i1 } %44, 1
+  %46 = or i1 %42, %45
+  %47 = extractvalue { i32, i1 } %44, 0
+  %48 = select i1 %46, i32 0, i32 %47
+  br i1 %46, label %if-true-block22, label %if-false-block23
+
+if-true-block22:                                  ; preds = %endif-block9
+  store i8* %6, i8** %0
+  br label %endif-block21
+
+if-false-block23:                                 ; preds = %endif-block9
+  %49 = getelementptr i8, i8* %.map18, i32 %40
+  store i8* %49, i8** %0
+  br label %endif-block21
+
+endif-block21:                                    ; preds = %if-false-block23, %if-true-block22
+  %map_ptr24 = load i8*, i8** %0
+  store i32 0, i32* %loop_counter
+  store i32 0, i32* %loop_counter
+  br label %loop_begin
+
+loop_begin:                                       ; preds = %endif-block25, %endif-block21
+  %50 = load i32, i32* %loop_counter
+  %51 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %io, i32 %50
+  %52 = insertelement <8 x i32> undef, i32 %50, i32 0
+  %53 = shufflevector <8 x i32> %52, <8 x i32> undef, <8 x i32> zeroinitializer
+  %54 = add <8 x i32> %53, <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
+  %55 = icmp ult <8 x i32> %54, %9
+  %56 = sext <8 x i1> %55 to <8 x i32>
+  %57 = trunc <8 x i32> %56 to <8 x i1>
+  %58 = select <8 x i1> %57, <8 x i32> %54, <8 x i32> %9
+  br i1 %7, label %if-true-block26, label %if-false-block27
+
+if-true-block26:                                  ; preds = %loop_begin
+  %59 = shl <8 x i32> %58, <i32 2, i32 2, i32 2, i32 2, i32 2, i32 2, i32 2, i32 2>
+  %60 = bitcast i32* %fetch_elts to i8*
+  %61 = call <8 x i32> @llvm.x86.avx2.gather.d.d.256(<8 x i32> undef, i8* %60, <8 x i32> %59, <8 x i32> <i32 -1, i32 -1, i32 -1, i32 -1, i32 -1, i32 -1, i32 -1, i32 -1>, i8 1) #2
+  store <8 x i32> %61, <8 x i32>* %index_store
+  br label %endif-block25
+
+if-false-block27:                                 ; preds = %loop_begin
+  %62 = add <8 x i32> %58, %11
+  store <8 x i32> %62, <8 x i32>* %index_store
+  br label %endif-block25
+
+endif-block25:                                    ; preds = %if-false-block27, %if-true-block26
+  %63 = load <8 x i32>, <8 x i32>* %index_store
+  %64 = insertelement <8 x i32> undef, i32 %14, i32 0
+  %65 = shufflevector <8 x i32> %64, <8 x i32> undef, <8 x i32> zeroinitializer
+  %66 = insertelement <8 x i32> undef, i32 %22, i32 0
+  %67 = shufflevector <8 x i32> %66, <8 x i32> undef, <8 x i32> zeroinitializer
+  %68 = mul <8 x i32> %65, %63
+ 
+  %490 = bitcast float* %489 to <4 x float>*
+  store <4 x float> %473, <4 x float>* %490, align 4
+  %.data_ptr120 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %482, i32 0, i32 2
+  %491 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr120, i32 0, i32 2, i32 0
+  %492 = bitcast float* %491 to <4 x float>*
+  store <4 x float> %474, <4 x float>* %492, align 4
+  %.data_ptr121 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %483, i32 0, i32 2
+  %493 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr121, i32 0, i32 2, i32 0
+  %494 = bitcast float* %493 to <4 x float>*
+  store <4 x float> %475, <4 x float>* %494, align 4
+  %.data_ptr122 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %484, i32 0, i32 2
+  %495 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr122, i32 0, i32 2, i32 0
+  %496 = bitcast float* %495 to <4 x float>*
+  store <4 x float> %476, <4 x float>* %496, align 4
+  %.data_ptr123 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %485, i32 0, i32 2
+  %497 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr123, i32 0, i32 2, i32 0
+  %498 = bitcast float* %497 to <4 x float>*
+  store <4 x float> %477, <4 x float>* %498, align 4
+  %.data_ptr124 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %486, i32 0, i32 2
+  %499 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr124, i32 0, i32 2, i32 0
+  %500 = bitcast float* %499 to <4 x float>*
+  store <4 x float> %478, <4 x float>* %500, align 4
+  %.data_ptr125 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %487, i32 0, i32 2
+  %501 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr125, i32 0, i32 2, i32 0
+  %502 = bitcast float* %501 to <4 x float>*
+  store <4 x float> %479, <4 x float>* %502, align 4
+  %.data_ptr126 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %488, i32 0, i32 2
+  %503 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr126, i32 0, i32 2, i32 0
+  %504 = bitcast float* %503 to <4 x float>*
+  store <4 x float> %480, <4 x float>* %504, align 4
+  %505 = add i32 %50, 8
+  store i32 %505, i32* %loop_counter
+  %506 = icmp uge i32 %505, %count
+  br i1 %506, label %loop_end, label %loop_begin
+
+loop_end:                                         ; preds = %endif-block25
+  %507 = load i32, i32* %loop_counter
+  %508 = load <8 x i32>, <8 x i32>* %4
+  %509 = bitcast <8 x i32> %508 to i256
+  %510 = icmp ne i256 %509, 0
+  %511 = zext i1 %510 to i8
+  ret i8 %511
+}
+
+   1 debug_get_bool_option: SWRAST_NO_PRESENT = FALSE
+   2 debug_get_option: GALLIUM_DRIVER = llvmpipe
+   3 debug_get_bool_option: GALLIUM_DUMP_CPU = FALSE
+   4 debug_get_flags_option: LP_DEBUG = 0x0 (1)
+   5 debug_get_flags_option: LP_PERF = 0x0
+   6 debug_get_flags_option: GALLIVM_DEBUG = 0x3 (tgsi,ir)
+   7 debug_get_flags_option: GALLIVM_PERF = 0x0
+   8 debug_get_bool_option: LP_FORCE_SSE2 = FALSE
+   9 debug_get_num_option: LP_NATIVE_VECTOR_WIDTH = 256
+  10 debug_get_num_option: LP_NUM_THREADS = 12
+  11 debug_get_bool_option: LP_NO_RAST = FALSE
+  12 debug_get_bool_option: DRAW_USE_LLVM = TRUE 
+
+
+
+
