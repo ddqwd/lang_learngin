@@ -1,0 +1,37 @@
+_mesa_draw_arraysstatic void
+142 set_verbose_flags(const char *str)
+143 {
+144 #ifdef DEBUG
+145    struct option {
+146       const char *name;
+147       GLbitfield flag;
+148    };
+149    static const struct option opts[] = {
+150       { "varray",    VERBOSE_VARRAY },
+151       { "tex",       VERBOSE_TEXTURE },
+152       { "mat",       VERBOSE_MATERIAL },
+153       { "pipe",      VERBOSE_PIPELINE },
+154       { "driver",    VERBOSE_DRIVER },
+155       { "state",     VERBOSE_STATE },
+156       { "api",       VERBOSE_API },
+157       { "list",      VERBOSE_DISPLAY_LIST },
+158       { "lighting",  VERBOSE_LIGHTING },
+159       { "disassem",  VERBOSE_DISASSEM },
+160       { "draw",      VERBOSE_DRAW },
+161       { "swap",      VERBOSE_SWAPBUFFERS }
+162    };
+163    GLuint i;
+164 
+165    if (!str)
+166       return;
+167 
+168    MESA_VERBOSE = 0x0;
+169    for (i = 0; i < ARRAY_SIZE(opts); i++) {
+170       if (strstr(str, opts[i].name) || strcmp(str, "all") == 0)
+171          MESA_VERBOSE |= opts[i].flag;
+172    }
+173 #endif
+174 }
+
+
+
