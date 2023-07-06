@@ -1,879 +1,1339 @@
 
-## Mesa
+sfds
+sfdsfs
+sfdsfsdf
 
- ST_DEBUG
-tgsi
-draw
 
+/** DRI2 interface */
+ 808 const __DRIdri2Extension driDRI2Extension = {
+ 809     .base = { __DRI_DRI2, 4 },
+ 810 
+ 811     .createNewScreen            = dri2CreateNewScreen,
+ 812     .createNewDrawable          = driCreateNewDrawable,
+ 813     .createNewContext           = driCreateNewContext,
+ 814     .getAPIMask                 = driGetAPIMask,
+ 815     .createNewContextForAPI     = driCreateNewContextForAPI,
+ 816     .allocateBuffer             = dri2AllocateBuffer,
+ 817     .releaseBuffer              = dri2ReleaseBuffer,
+ 818     .createContextAttribs       = driCreateContextAttribs,
+ 819     .createNewScreen2           = driCreateNewScreen2,
+ 820 };
+<BS>
+
+
+
+<RightMouse>
+
+
+63 _X_HIDDEN __GLXDRIdisplay *
+964 driswCreateDisplay(Display * dpy)
+965 {     
+966    struct drisw_display *pdpyp;
+967       
+968    pdpyp = malloc(sizeof *pdpyp);
+969    if (pdpyp == NULL)  field base                   
+970       return NULL;                                  
+971                        Type: __GLXDRIdisplay        
+972    pdpyp->base.destroy                              
+973    pdpyp->base.createS // In struct drisw_display   
+974                        public: __GLXDRIdisplay base 
+975    return &pdpyp->base; 
+976 }
+
+
+__glXInitialize
+driswCreateDisplay
+
+  driOpenSwrast
+   driOpenDriver
+
+  createNewScreen2
+ *driver_configs = psp->driver->InitScreen(psp);                                                                                                          
+ 
+/**
+ * DRI driver virtual function table.
+ *
+ * DRI versions differ in their implementation of init_screen and swap_buffers.
+ */
+const struct __DriverAPIRec galliumsw_driver_api = {
+   .InitScreen = drisw_init_screen,
+   .DestroyScreen = dri_destroy_screen,
+   .CreateContext = dri_create_context,
+   .DestroyContext = dri_destroy_context,
+   .CreateBuffer = drisw_create_buffer,
+   .DestroyBuffer = dri_destroy_buffer,
+   .SwapBuffers = drisw_swap_buffers,
+   .MakeCurrent = dri_make_current,
+   .UnbindContext = dri_unbind_context,
+   .CopySubBuffer = drisw_copy_sub_buffer,
+};
+
+
+
+
+
+
+/**
+ * This is a constructor function for the megadriver dynamic library.
+ *
+ * When the driver is dlopen'ed, this function will run. It will
+ * search for the name of the foo_dri.so file that was opened using
+ * the dladdr function.
+ *
+ * After finding foo's name, it will call __driDriverGetExtensions_foo
+ * and use the return to update __driDriverExtensions to enable
+ * compatibility with older DRI driver loaders.
+ */
+__attribute__((constructor)) static void
+megadriver_stub_init(void)
+{
+   Dl_info info;
+   char *driver_name;
+   size_t name_len;
+   char *get_extensions_name;
+   const __DRIextension **(*get_extensions)(void);
+   const __DRIextension **extensions;
+   int i;
+
+   /* Call dladdr on __driDriverExtensions. We are really
+    * interested in the returned info.dli_fname so we can
+    * figure out the path name of the library being loaded.
+    */
+   i = dladdr((void*) __driDriverExtensions, &info);
+   if (i == 0)
+      return;
+
+   /* Search for the last '/' character in the path. */
+   driver_name = strrchr(info.dli_fname, '/');
+   if (driver_name != NULL) {
+      /* Skip '/' character */
+      driver_name++;
+   } else {
+      /* Try using the start of the path */
+      driver_name = (char*) info.dli_fname;
+   }
+
+   /* Make sure the path ends with _dri.so */
+   name_len = strlen(driver_name);
+   i = name_len - LIB_PATH_SUFFIX_LENGTH;
+   if (i < 0 || strcmp(driver_name + i, LIB_PATH_SUFFIX) != 0)
+      return;
+
+   /* Duplicate the string so we can modify it.
+    * So far we've been using info.dli_fname.
+    */
+   driver_name = strdup(driver_name);
+   if (!driver_name)
+      return;
+
+   /* The path ends with _dri.so. Chop this part of the
+    * string off. Then we'll have the driver's final name.
+    */
+   driver_name[i] = '\0';
+
+   i = asprintf(&get_extensions_name, "%s_%s",
+                __DRI_DRIVER_GET_EXTENSIONS, driver_name);
+   free(driver_name);
+   if (i == -1)
+      return;
+
+   /* dlsym to get the driver's get extensions function. We
+    * don't have the dlopen handle, so we have to use
+    * RTLD_DEFAULT. It seems unlikely that the symbol will
+    * be found in another library, but this isn't optimal.
+    */
+   get_extensions = dlsym(RTLD_DEFAULT, get_extensions_name);
+   free(get_extensions_name);
+   if (!get_extensions)
+      return;
+
+   /* Use the newer DRI loader entrypoint to find extensions.
+    * We will then expose these extensions via the older
+    * __driDriverExtensions symbol.
+    */
+   extensions = get_extensions();
+
+   /* Copy the extensions into the __driDriverExtensions array
+    * we declared.
+    */
+   for (i = 0; i < ARRAY_SIZE(__driDriverExtensions); i++) {
+      __driDriverExtensions[i] = extensions[i];
+      if (extensions[i] == NULL)
+         break;
+   }
+
+   /* If the driver had more extensions than we reserved, then
+    * bail out.
+    */
+   if (i == ARRAY_SIZE(__driDriverExtensions)) {
+      __driDriverExtensions[0] = NULL;
+      fprintf(stderr, "Megadriver stub did not reserve enough extension "
+              "slots.\n");
+      return;
+   }
+}
+
+#endif /* RTLD_DEFAULT && HAVE_DLADDR */
+
+
+
+#if defined(GALLIUM_SOFTPIPE)
+
+const __DRIextension **__driDriverGetExtensions_swrast(void);
+
+PUBLIC const __DRIextension **__driDriverGetExtensions_swrast(void)
+{
+   globalDriverAPI = &galliumsw_driver_api;
+   return galliumsw_driver_extensions;
+}
+
+
+
+static const __DRIconfig **
+drisw_init_screen(__DRIscreen * sPriv)
+{
+   const __DRIswrastLoaderExtension *loader = sPriv->swrast_loader;
+   const __DRIconfig **configs;
+   struct dri_screen *screen;
+   struct pipe_screen *pscreen = NULL;
+   const struct drisw_loader_funcs *lf = &drisw_lf;
+
+   screen = CALLOC_STRUCT(dri_screen);
+   if (!screen)
+      return NULL;
+
+   screen->sPriv = sPriv;
+   screen->fd = -1;
+
+   screen->swrast_no_present = debug_get_option_swrast_no_present();
+
+   sPriv->driverPrivate = (void *)screen;
+   sPriv->extensions = drisw_screen_extensions;
+   if (loader->base.version >= 4) {
+      if (loader->putImageShm)
+         lf = &drisw_shm_lf;
+   }
+
+   if (pipe_loader_sw_probe_dri(&screen->dev, lf)) {
+      dri_init_options(screen);
+
+      pscreen = pipe_loader_create_screen(screen->dev);
+   }
+
+   if (!pscreen)
+      goto fail;
+
+   configs = dri_init_screen_helper(screen, pscreen);
+   if (!configs)
+      goto fail;
+
+   screen->lookup_egl_image = dri2_lookup_egl_image;
+
+   return configs;
+fail:
+   dri_destroy_screen_helper(screen);
+   if (screen->dev)
+      pipe_loader_release(&screen->dev, 1);
+   FREE(screen);
+   return NULL;
+}
+
+
+
+
+const __DRIconfig **
+dri_init_screen_helper(struct dri_screen *screen,
+                       struct pipe_screen *pscreen)
+{
+   screen->base.screen = pscreen;
+   screen->base.get_egl_image = dri_get_egl_image;
+   screen->base.get_param = dri_get_param;
+   screen->base.set_background_context = dri_set_background_context;
+
+   screen->st_api = st_gl_api_create();
+   if (!screen->st_api)
+      return NULL;
+
+   if(pscreen->get_param(pscreen, PIPE_CAP_NPOT_TEXTURES))
+      screen->target = PIPE_TEXTURE_2D;
+   else
+      screen->target = PIPE_TEXTURE_RECT;
+
+   dri_postprocessing_init(screen);
+
+   screen->st_api->query_versions(screen->st_api, &screen->base,
+                                  &screen->options,
+                                  &screen->sPriv->max_gl_core_version,
+                                  &screen->sPriv->max_gl_compat_version,
+                                  &screen->sPriv->max_gl_es1_version,
+                                  &screen->sPriv->max_gl_es2_version);
+
+   return dri_fill_in_modes(screen);
+}
+
+
+
+
+GLboolean
+dri_create_context(gl_api api, const struct gl_config * visual,
+                   __DRIcontext * cPriv,
+                   const struct __DriverContextConfig *ctx_config,
+                   unsigned *error,
+                   void *sharedContextPrivate)
+{
+
+
+
+   attribs.options = screen->options;
+   dri_fill_st_visual(&attribs.visual, screen, visual);
+   ctx->st = stapi->create_context(stapi, &screen->base, &attribs, &ctx_err,
+				   st_share);
+
+
+
+
+
+#ifdef GALLIUM_STATIC_TARGETS
+static const struct sw_driver_descriptor driver_descriptors = {
+   .create_screen = sw_screen_create,
+   .winsys = {
+#ifdef HAVE_PIPE_LOADER_DRI
+      {
+         .name = "dri",
+         .create_winsys = dri_create_sw_winsys,
+      },
+#endif
+#ifdef HAVE_PIPE_LOADER_KMS
+      {
+         .name = "kms_dri",
+         .create_winsys = kms_dri_create_winsys,
+      },
+#endif
+
+
+struct pipe_screen *
+sw_screen_create(struct sw_winsys *winsys)
+{
+   const char *default_driver;
+   const char *driver;
+
+#if defined(GALLIUM_LLVMPIPE)
+   default_driver = "llvmpipe";
+#elif defined(GALLIUM_SOFTPIPE)
+   default_driver = "softpipe";
+#elif defined(GALLIUM_SWR)
+   default_driver = "swr";
+#else
+   default_driver = "";
+#endif
+
+   driver = debug_get_option("GALLIUM_DRIVER", default_driver);
+   return sw_screen_create_named(winsys, driver);
+}
+
+
+static inline struct pipe_screen *
+sw_screen_create_named(struct sw_winsys *winsys, const char *driver)
+{
+   struct pipe_screen *screen = NULL;
+
+#if defined(GALLIUM_LLVMPIPE)
+   if (screen == NULL && strcmp(driver, "llvmpipe") == 0)
+      screen = llvmpipe_create_screen(winsys);
+#endif
+
+#if defined(GALLIUM_VIRGL)
+   if (screen == NULL && strcmp(driver, "virpipe") == 0) {
+      struct virgl_winsys *vws;
+      vws = virgl_vtest_winsys_wrap(winsys);
+      screen = virgl_create_screen(vws);
+   }
+#endif
+
+#if defined(GALLIUM_SOFTPIPE)
+   if (screen == NULL && strcmp(driver, "softpipe") == 0)
+      screen = softpipe_create_screen(winsys);
+#endif
+
+#if defined(GALLIUM_SWR)
+   if (screen == NULL && strcmp(driver, "swr") == 0)
+      screen = swr_create_screen(winsys);
+#endif
+
+   return screen;
+}
+
+
+
+/**
+ * Create a new pipe_screen object
+ * Note: we're not presently subclassing pipe_screen (no llvmpipe_screen).
+ */
+struct pipe_screen *
+llvmpipe_create_screen(struct sw_winsys *winsys)
+{
+   struct llvmpipe_screen *screen;
+
+   util_cpu_detect();
 
 #ifdef DEBUG
-extern int ST_DEBUG;
-#define DBSTR(x) x
-#else
-#define ST_DEBUG 0
-#define DBSTR(x) ""
+   LP_DEBUG = debug_get_flags_option("LP_DEBUG", lp_debug_flags, 0 );
 #endif
 
+   LP_PERF = debug_get_flags_option("LP_PERF", lp_perf_flags, 0 );
+
+   screen = CALLOC_STRUCT(llvmpipe_screen);
+   if (!screen)
+      return NULL;
+
+   if (!lp_jit_screen_init(screen)) {
+      FREE(screen);
+      return NULL;
+   }
+
+   screen->winsys = winsys;
+
+   screen->base.destroy = llvmpipe_destroy_screen;
+
+   screen->base.get_name = llvmpipe_get_name;
+   screen->base.get_vendor = llvmpipe_get_vendor;
+   screen->base.get_device_vendor = llvmpipe_get_vendor; // TODO should be the CPU vendor
+   screen->base.get_param = llvmpipe_get_param;
+   screen->base.get_shader_param = llvmpipe_get_shader_param;
+   screen->base.get_paramf = llvmpipe_get_paramf;
+   screen->base.is_format_supported = llvmpipe_is_format_supported;
+
+   screen->base.context_create = llvmpipe_create_context;
+   screen->base.flush_frontbuffer = llvmpipe_flush_frontbuffer;
+   screen->base.fence_reference = llvmpipe_fence_reference;
+   screen->base.fence_finish = llvmpipe_fence_finish;
+
+   screen->base.get_timestamp = llvmpipe_get_timestamp;
+
+   llvmpipe_init_screen_resource_funcs(&screen->base);
+
+   screen->num_threads = util_cpu_caps.nr_cpus > 1 ? util_cpu_caps.nr_cpus : 0;
+#ifdef PIPE_SUBSYSTEM_EMBEDDED
+   screen->num_threads = 0;
+#endif
+   screen->num_threads = debug_get_num_option("LP_NUM_THREADS", screen->num_threads);
+   screen->num_threads = MIN2(screen->num_threads, LP_MAX_THREADS);
+
+   screen->rast = lp_rast_create(screen->num_threads);
+   if (!screen->rast) {
+      lp_jit_screen_cleanup(screen);
+      FREE(screen);
+      return NULL;
+   }
+   (void) mtx_init(&screen->rast_mutex, mtx_plain);
+
+   return &screen->base;
+}
 
 
 
-st_create_context
-	---> st_debug_init
-		----> debug_get_option_st_debug
-			----> debug_get_flags_option
-				---> os_get_option   -> getenv()
-special case for "help"
 
-uint64_t
-debug_get_flags_option(const char *name,
-                       const struct debug_named_value *flags,
-                       uint64_t dfault)
-{  
-   uint64_t result;
-   const char *str;        variable str                 
-   const struct debug_name                              
-   unsigned namealign = 0; Type: const char *           
-                           Passed as __s1               
-   str = os_get_option(nam                              
-   if (!str)               // In debug_get_flags_option 
-      result = dfault;     const char *str              
-   else if (!util_strcmp(str, "help")) {
-      result = dfault;
-      _debug_printf("%s: help for %s:\n", __FUNCTION__, name);
-      for (; flags->name; ++flags)
-         namealign = MAX2(namealign, strlen(flags->name));
-      for (flags = orig; flags->name; ++flags)
-         _debug_printf("| %*s [0x%0*"PRIx64"]%s%s\n", namealign, flags->name,
-                      (int)sizeof(uint64_t)*CHAR_BIT/4, flags->value,
-                      flags->desc ? " " : "", flags->desc ? flags->desc : "");
+struct pipe_context *
+llvmpipe_create_context(struct pipe_screen *screen, void *priv,
+                        unsigned flags)
+{
+   struct llvmpipe_context *llvmpipe;
+
+   llvmpipe = align_malloc(sizeof(struct llvmpipe_context), 16);
+   if (!llvmpipe)
+      return NULL;
+
+   util_init_math();
+
+   memset(llvmpipe, 0, sizeof *llvmpipe);
+
+   make_empty_list(&llvmpipe->fs_variants_list);
+
+   make_empty_list(&llvmpipe->setup_variants_list);
+
+
+   llvmpipe->pipe.screen = screen;
+   llvmpipe->pipe.priv = priv;
+
+   /* Init the pipe context methods */
+   llvmpipe->pipe.destroy = llvmpipe_destroy;
+   llvmpipe->pipe.set_framebuffer_state = llvmpipe_set_framebuffer_state;
+   llvmpipe->pipe.clear = llvmpipe_clear;
+   llvmpipe->pipe.flush = do_flush;
+
+   llvmpipe->pipe.render_condition = llvmpipe_render_condition;
+
+   llvmpipe_init_blend_funcs(llvmpipe);
+   llvmpipe_init_clip_funcs(llvmpipe);
+   llvmpipe_init_draw_funcs(llvmpipe);
+   llvmpipe_init_sampler_funcs(llvmpipe);
+   llvmpipe_init_query_funcs( llvmpipe );
+   llvmpipe_init_vertex_funcs(llvmpipe);
+   llvmpipe_init_so_funcs(llvmpipe);
+   llvmpipe_init_fs_funcs(llvmpipe);
+   llvmpipe_init_vs_funcs(llvmpipe);
+   llvmpipe_init_gs_funcs(llvmpipe);
+   llvmpipe_init_rasterizer_funcs(llvmpipe);
+   llvmpipe_init_context_resource_funcs( &llvmpipe->pipe );
+   llvmpipe_init_surface_functions(llvmpipe);
+
+#ifdef USE_GLOBAL_LLVM_CONTEXT
+   llvmpipe->context = LLVMGetGlobalContext();
+#else
+   llvmpipe->context = LLVMContextCreate();
+#endif
+
+   if (!llvmpipe->context)
+      goto fail;
+
+   /*
+    * Create drawing context and plug our rendering stage into it.
+    */
+   llvmpipe->draw = draw_create_with_llvm_context(&llvmpipe->pipe,
+                                                  llvmpipe->context);
+   if (!llvmpipe->draw)
+      goto fail;
+
+   /* FIXME: devise alternative to draw_texture_samplers */
+
+   llvmpipe->setup = lp_setup_create( &llvmpipe->pipe,
+                                      llvmpipe->draw );
+   if (!llvmpipe->setup)
+      goto fail;
+
+   llvmpipe->pipe.stream_uploader = u_upload_create_default(&llvmpipe->pipe);
+   if (!llvmpipe->pipe.stream_uploader)
+      goto fail;
+   llvmpipe->pipe.const_uploader = llvmpipe->pipe.stream_uploader;
+
+   llvmpipe->blitter = util_blitter_create(&llvmpipe->pipe);
+   if (!llvmpipe->blitter) {
+      goto fail;
+   }
+
+   /* must be done before installing Draw stages */
+   util_blitter_cache_all_shaders(llvmpipe->blitter);
+
+   /* plug in AA line/point stages */
+   draw_install_aaline_stage(llvmpipe->draw, &llvmpipe->pipe);
+   draw_install_aapoint_stage(llvmpipe->draw, &llvmpipe->pipe);
+   draw_install_pstipple_stage(llvmpipe->draw, &llvmpipe->pipe);
+
+   /* convert points and lines into triangles: 
+    * (otherwise, draw points and lines natively)
+    */
+   draw_wide_point_sprites(llvmpipe->draw, FALSE);
+   draw_enable_point_sprites(llvmpipe->draw, FALSE);
+   draw_wide_point_threshold(llvmpipe->draw, 10000.0);
+   draw_wide_line_threshold(llvmpipe->draw, 10000.0);
+
+   lp_reset_counters();
+
+   /* If llvmpipe_set_scissor_states() is never called, we still need to
+    * make sure that derived scissor state is computed.
+    * See https://bugs.freedesktop.org/show_bug.cgi?id=101709
+    */
+   llvmpipe->dirty |= LP_NEW_SCISSOR;
+
+   return &llvmpipe->pipe;
+
+ fail:
+   llvmpipe_destroy(&llvmpipe->pipe);
+   return NULL;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+struct st_context *
+st_create_context(gl_api api, struct pipe_context *pipe,
+                  const struct gl_config *visual,
+                  struct st_context *share,
+                  const struct st_config_options *options,
+                  bool no_error)
+{
+   struct gl_context *ctx;
+   struct gl_context *shareCtx = share ? share->ctx : NULL;
+   struct dd_function_table funcs;
+   struct st_context *st;
+
+   util_cpu_detect();
+
+   memset(&funcs, 0, sizeof(funcs));
+   st_init_driver_functions(pipe->screen, &funcs);
+
+   ctx = calloc(1, sizeof(struct gl_context));
+   if (!ctx)
+      return NULL;
+
+   if (!_mesa_initialize_context(ctx, api, visual, shareCtx, &funcs)) {
+      free(ctx);
+      return NULL;
+   }
+
+   st_debug_init();
+
+   if (pipe->screen->get_disk_shader_cache &&
+       !(ST_DEBUG & DEBUG_TGSI))
+      ctx->Cache = pipe->screen->get_disk_shader_cache(pipe->screen);
+
+   /* XXX: need a capability bit in gallium to query if the pipe
+    * driver prefers DP4 or MUL/MAD for vertex transformation.
+    */
+   if (debug_get_option_mesa_mvp_dp4())
+      ctx->Const.ShaderCompilerOptions[MESA_SHADER_VERTEX].OptimizeForAOS = GL_TRUE;
+
+   st = st_create_context_priv(ctx, pipe, options, no_error);
+   if (!st) {
+      _mesa_destroy_context(ctx);
+   }
+
+   return st;
+}
+
+
+
+
+
+void
+st_init_driver_functions(struct pipe_screen *screen,
+                         struct dd_function_table *functions)
+{
+   _mesa_init_sampler_object_functions(functions);
+
+   st_init_draw_functions(functions);
+   st_init_blit_functions(functions);
+   st_init_bufferobject_functions(screen, functions);
+   st_init_clear_functions(functions);
+   st_init_bitmap_functions(functions);
+   st_init_copy_image_functions(functions);
+   st_init_drawpixels_functions(functions);
+   st_init_rasterpos_functions(functions);
+
+   st_init_drawtex_functions(functions);
+
+   st_init_eglimage_functions(functions);
+
+   st_init_fbo_functions(functions);
+   st_init_feedback_functions(functions);
+   st_init_memoryobject_functions(functions);
+   st_init_msaa_functions(functions);
+   st_init_perfmon_functions(functions);
+   st_init_program_functions(functions);
+   st_init_query_functions(functions);
+   st_init_cond_render_functions(functions);
+   st_init_readpixels_functions(functions);
+   st_init_semaphoreobject_functions(functions);
+   st_init_texture_functions(functions);
+   st_init_texture_barrier_functions(functions);
+   st_init_flush_functions(screen, functions);
+   st_init_string_functions(functions);
+   st_init_viewport_functions(functions);
+   st_init_compute_functions(functions);
+
+   st_init_xformfb_functions(functions);
+   st_init_syncobj_functions(functions);
+
+   st_init_vdpau_functions(functions);
+
+   if (screen->get_param(screen, PIPE_CAP_STRING_MARKER))
+      functions->EmitStringMarker = st_emit_string_marker;
+
+   functions->Enable = st_Enable;
+   functions->UpdateState = st_invalidate_state;
+   functions->QueryMemoryInfo = st_query_memory_info;
+   functions->SetBackgroundContext = st_set_background_context;
+   functions->GetDriverUuid = st_get_driver_uuid;
+   functions->GetDeviceUuid = st_get_device_uuid;
+
+   /* GL_ARB_get_program_binary */
+   functions->GetProgramBinaryDriverSHA1 = st_get_program_binary_driver_sha1;
+
+   enum pipe_shader_ir preferred_ir = (enum pipe_shader_ir)
+      screen->get_shader_param(screen, PIPE_SHADER_VERTEX,
+                               PIPE_SHADER_CAP_PREFERRED_IR);
+   if (preferred_ir == PIPE_SHADER_IR_NIR) {
+      functions->ShaderCacheSerializeDriverBlob =  st_serialise_nir_program;
+      functions->ProgramBinarySerializeDriverBlob =
+         st_serialise_nir_program_binary;
+      functions->ProgramBinaryDeserializeDriverBlob =
+         st_deserialise_nir_program;
+   } else {
+      functions->ShaderCacheSerializeDriverBlob =  st_serialise_tgsi_program;
+      functions->ProgramBinarySerializeDriverBlob =
+         st_serialise_tgsi_program_binary;
+      functions->ProgramBinaryDeserializeDriverBlob =
+         st_deserialise_tgsi_program;
+   }
+}
+
+
+
+/**
+ * Device driver function table.
+ * Core Mesa uses these function pointers to call into device drivers.
+ * Most of these functions directly correspond to OpenGL state commands.
+ * Core Mesa will call these functions after error checking has been done
+ * so that the drivers don't have to worry about error testing.
+ *
+ * Vertex transformation/clipping/lighting is patched into the T&L module.
+ * Rasterization functions are patched into the swrast module.
+ *
+ * Note: when new functions are added here, the drivers/common/driverfuncs.c
+ * file should be updated too!!!
+ */
+struct dd_function_table {
+   /**
+    * Return a string as needed by glGetString().
+    * Only the GL_RENDERER query must be implemented.  Otherwise, NULL can be
+    * returned.
+    */
+   const GLubyte * (*GetString)( struct gl_context *ctx, GLenum name );
+
+   /**
+    * Notify the driver after Mesa has made some internal state changes.  
+    *
+    * This is in addition to any state change callbacks Mesa may already have
+    * made.
+
+
+
+
+/**
+ * Initialize a struct gl_context struct (rendering context).
+ *
+ * This includes allocating all the other structs and arrays which hang off of
+ * the context by pointers.
+ * Note that the driver needs to pass in its dd_function_table here since
+ * we need to at least call driverFunctions->NewTextureObject to create the
+ * default texture objects.
+ *
+ * Called by _mesa_create_context().
+ *
+ * Performs the imports and exports callback tables initialization, and
+ * miscellaneous one-time initializations. If no shared context is supplied one
+ * is allocated, and increase its reference count.  Setups the GL API dispatch
+ * tables.  Initialize the TNL module. Sets the maximum Z buffer depth.
+ * Finally queries the \c MESA_DEBUG and \c MESA_VERBOSE environment variables
+ * for debug flags.
+ *
+ * \param ctx the context to initialize
+ * \param api the GL API type to create the context for
+ * \param visual describes the visual attributes for this context or NULL to
+ *               create a configless context
+ * \param share_list points to context to share textures, display lists,
+ *        etc with, or NULL
+ * \param driverFunctions table of device driver functions for this context
+ *        to use
+ */
+GLboolean
+_mesa_initialize_context(struct gl_context *ctx,
+                         gl_api api,
+                         const struct gl_config *visual,
+                         struct gl_context *share_list,
+                         const struct dd_function_table *driverFunctions)
+{
+   struct gl_shared_state *shared;
+   int i;
+
+   assert(driverFunctions->NewTextureObject);
+   assert(driverFunctions->FreeTextureImageBuffer);
+
+   ctx->API = api;
+   ctx->DrawBuffer = NULL;
+   ctx->ReadBuffer = NULL;
+   ctx->WinSysDrawBuffer = NULL;
+   ctx->WinSysReadBuffer = NULL;
+
+   if (visual) {
+      ctx->Visual = *visual;
+      ctx->HasConfig = GL_TRUE;
    }
    else {
-      result = 0;
-      while (flags->name) {
-     if (str_has_option(str, flags->name))
-        result |= flags->value;
-     ++flags;
-      }
+      memset(&ctx->Visual, 0, sizeof ctx->Visual);
+      ctx->HasConfig = GL_FALSE;
    }
-   
-   if (debug_get_option_should_print()) {
-      if (str) {
-         debug_printf("%s: %s = 0x%"PRIx64" (%s)\n",
-                      __FUNCTION__, name, result, str);
-      } else {
-         debug_printf("%s: %s = 0x%"PRIx64"\n", __FUNCTION__, name, result);
-      }
+
+   _mesa_override_gl_version(ctx);
+
+   /* misc one-time initializations */
+   one_time_init(ctx);
+
+   /* Plug in driver functions and context pointer here.
+    * This is important because when we call alloc_shared_state() below
+    * we'll call ctx->Driver.NewTextureObject() to create the default
+    * textures.
+    */
+   ctx->Driver = *driverFunctions;
+
+   if (share_list) {
+      /* share state with another context */
+      shared = share_list->Shared;
    }
-   
-   return result;
+   else {
+      /* allocate new, unshared state */
+      shared = _mesa_alloc_shared_state(ctx);
+      if (!shared)
+         return GL_FALSE;
+   }
+
+   _mesa_reference_shared_state(ctx, &ctx->Shared, shared);
+
+   if (!init_attrib_groups( ctx ))
+      goto fail;
+
+   /* KHR_no_error is likely to crash, overflow memory, etc if an application
+    * has errors so don't enable it for setuid processes.
+    */
+   if (env_var_as_boolean("MESA_NO_ERROR", false)) {
+#if !defined(_WIN32)
+      if (geteuid() == getuid())
+#endif
+         ctx->Const.ContextFlags |= GL_CONTEXT_FLAG_NO_ERROR_BIT_KHR;
+   }
+
+   /* setup the API dispatch tables with all nop functions */
+   ctx->OutsideBeginEnd = _mesa_alloc_dispatch_table();
+   if (!ctx->OutsideBeginEnd)
+      goto fail;
+   ctx->Exec = ctx->OutsideBeginEnd;
+   ctx->CurrentClientDispatch = ctx->CurrentServerDispatch = ctx->OutsideBeginEnd;
+
+   ctx->FragmentProgram._MaintainTexEnvProgram
+      = (getenv("MESA_TEX_PROG") != NULL);
+
+   ctx->VertexProgram._MaintainTnlProgram
+      = (getenv("MESA_TNL_PROG") != NULL);
+   if (ctx->VertexProgram._MaintainTnlProgram) {
+      /* this is required... */
+      ctx->FragmentProgram._MaintainTexEnvProgram = GL_TRUE;
+   }
+
+   /* Mesa core handles all the formats that mesa core knows about.
+    * Drivers will want to override this list with just the formats
+    * they can handle, and confirm that appropriate fallbacks exist in
+    * _mesa_choose_tex_format().
+    */
+   memset(&ctx->TextureFormatSupported, GL_TRUE,
+          sizeof(ctx->TextureFormatSupported));
+
+   switch (ctx->API) {
+   case API_OPENGL_COMPAT:
+      ctx->BeginEnd = create_beginend_table(ctx);
+      ctx->Save = _mesa_alloc_dispatch_table();
+      if (!ctx->BeginEnd || !ctx->Save)
+         goto fail;
+
+      /* fall-through */
+   case API_OPENGL_CORE:
+      break;
+   case API_OPENGLES:
+      /**
+       * GL_OES_texture_cube_map says
+       * "Initially all texture generation modes are set to REFLECTION_MAP_OES"
+       */
+      for (i = 0; i < ARRAY_SIZE(ctx->Texture.FixedFuncUnit); i++) {
+         struct gl_fixedfunc_texture_unit *texUnit =
+            &ctx->Texture.FixedFuncUnit[i];
+
+         texUnit->GenS.Mode = GL_REFLECTION_MAP_NV;
+         texUnit->GenT.Mode = GL_REFLECTION_MAP_NV;
+         texUnit->GenR.Mode = GL_REFLECTION_MAP_NV;
+         texUnit->GenS._ModeBit = TEXGEN_REFLECTION_MAP_NV;
+         texUnit->GenT._ModeBit = TEXGEN_REFLECTION_MAP_NV;
+         texUnit->GenR._ModeBit = TEXGEN_REFLECTION_MAP_NV;
+      }
+      break;
+   case API_OPENGLES2:
+      ctx->FragmentProgram._MaintainTexEnvProgram = GL_TRUE;
+      ctx->VertexProgram._MaintainTnlProgram = GL_TRUE;
+      break;
+   }
+
+   ctx->FirstTimeCurrent = GL_TRUE;
+
+   return GL_TRUE;
+
+fail:
+   _mesa_reference_shared_state(ctx, &ctx->Shared, NULL);
+   free(ctx->BeginEnd);
+   free(ctx->OutsideBeginEnd);
+   free(ctx->Save);
+   return GL_FALSE;
 }
 
 
-static const struct debug_named_value st_debug_flags[] = {
-   { "mesa",     DEBUG_MESA, NULL },
-   { "tgsi",     DEBUG_TGSI, NULL },
-   { "constants",DEBUG_CONSTANTS, NULL },
-   { "pipe",     DEBUG_PIPE, NULL },
-   { "tex",      DEBUG_TEX, NULL },
-   { "fallback", DEBUG_FALLBACK, NULL },
-   { "screen",   DEBUG_SCREEN, NULL },
-   { "query",    DEBUG_QUERY, NULL },
-   { "draw",     DEBUG_DRAW, NULL },
-   { "buffer",   DEBUG_BUFFER, NULL },
-   { "wf",       DEBUG_WIREFRAME, NULL },
-   { "precompile",  DEBUG_PRECOMPILE, NULL },
-   { "gremedy",  DEBUG_GREMEDY, "Enable GREMEDY debug extensions" },
-   { "noreadpixcache", DEBUG_NOREADPIXCACHE, NULL },
-   DEBUG_NAMED_VALUE_END
-};
-
-# GALLIVM_DEBUG
-
-static const struct debug_named_value lp_bld_debug_flags[] = {
-   { "tgsi",   GALLIVM_DEBUG_TGSI, NULL },
-   { "ir",     GALLIVM_DEBUG_IR, NULL },
-   { "asm",    GALLIVM_DEBUG_ASM, NULL },
-   { "perf",   GALLIVM_DEBUG_PERF, NULL },
-   { "gc",     GALLIVM_DEBUG_GC, NULL },
-   { "dumpbc", GALLIVM_DEBUG_DUMP_BC, NULL },
-   DEBUG_NAMED_VALUE_END
-};
+o
 
 
-```c++
+/**
+ * Mesa rendering context.
+ *
+ * This is the central context data structure for Mesa.  Almost all
+ * OpenGL state is contained in this structure.
+ * Think of this as a base class from which device drivers will derive
+ * sub classes.
+ */
+struct gl_context
+{
+   /** State possibly shared with other contexts in the address space */
+   struct gl_shared_state *Shared;
+
+   /** \name API function pointer tables */
+   /*@{*/
+   gl_api API;
+
+   /**
+    * The current dispatch table for non-displaylist-saving execution, either
+    * BeginEnd or OutsideBeginEnd
+    */
+   struct _glapi_table *Exec;
+   /**
+    * The normal dispatch table for non-displaylist-saving, non-begin/end
+    */
+   struct _glapi_table *OutsideBeginEnd;
+   /** The dispatch table used between glNewList() and glEndList() */
+   struct _glapi_table *Save;
+   /**
+    * The dispatch table used between glBegin() and glEnd() (outside of a
+    * display list).  Only valid functions between those two are set, which is
+    * mostly just the set in a GLvertexformat struct.
+    */
+   struct _glapi_table *BeginEnd;
+   /**
+    * Dispatch table for when a graphics reset has happened.
+    */
+   struct _glapi_table *ContextLost;
+   /**
+    * Dispatch table used to marshal API calls from the client program to a
+    * separate server thread.  NULL if API calls are not being marshalled to
+    * another thread.
+    */
+   struct _glapi_table *MarshalExec;
+   /**
+    * Dispatch table currently in use for fielding API calls from the client
+    * program.  If API calls are being marshalled to another thread, this ==
+    * MarshalExec.  Otherwise it == CurrentServerDispatch.
+    */
+   struct _glapi_table *CurrentClientDispatch;
+
+   /**
+    * Dispatch table currently in use for performing API calls.  == Save or
+    * Exec.
+    */
+   struct _glapi_table *CurrentServerDispatch;
+
+   /*@}*/
+
+   struct glthread_state *GLThread;
+
+   struct gl_config Visual;
+   struct gl_framebuffer *DrawBuffer;	/**< buffer for writing */
+   struct gl_framebuffer *ReadBuffer;	/**< buffer for reading */
+   struct gl_framebuffer *WinSysDrawBuffer;  /**< set with MakeCurrent */
+   struct gl_framebuffer *WinSysReadBuffer;  /**< set with MakeCurrent */
+
+   /**
+    * Device driver function pointer table
+    */
+   struct dd_function_table Driver;
+
+   /** Core/Driver constants */
+   struct gl_constants Const;
+
+   /** \name The various 4x4 matrix stacks */
+   /*@{*/
+   struct gl_matrix_stack ModelviewMatrixStack;
+   struct gl_matrix_stack ProjectionMatrixStack;
+   struct gl_matrix_stack TextureMatrixStack[MAX_TEXTURE_UNITS];
+   struct gl_matrix_stack ProgramMatrixStack[MAX_PROGRAM_MATRICES];
+   struct gl_matrix_stack *CurrentStack; /**< Points to one of the above stacks */
+   /*@}*/
+
+   /** Combined modelview and projection matrix */
+   GLmatrix _ModelProjectMatrix;
+
+   /** \name Display lists */
+   struct gl_dlist_state ListState;
+
+   GLboolean ExecuteFlag;	/**< Execute GL commands? */
+   GLboolean CompileFlag;	/**< Compile GL commands into display list? */
+
+   /** Extension information */
+   struct gl_extensions Extensions;
+
+   /** GL version integer, for example 31 for GL 3.1, or 20 for GLES 2.0. */
+   GLuint Version;
+   char *VersionString;
+
+   /** \name State attribute stack (for glPush/PopAttrib) */
+   /*@{*/
+   GLuint AttribStackDepth;
+   struct gl_attrib_node *AttribStack[MAX_ATTRIB_STACK_DEPTH];
+   /*@}*/
+
+   /** \name Renderer attribute groups
+    *
+    * We define a struct for each attribute group to make pushing and popping
+    * attributes easy.  Also it's a good organization.
+    */
+   /*@{*/
+   struct gl_accum_attrib	Accum;		/**< Accum buffer attributes */
+   struct gl_colorbuffer_attrib	Color;		/**< Color buffer attributes */
+   struct gl_current_attrib	Current;	/**< Current attributes */
+   struct gl_depthbuffer_attrib	Depth;		/**< Depth buffer attributes */
+   struct gl_eval_attrib	Eval;		/**< Eval attributes */
+   struct gl_fog_attrib		Fog;		/**< Fog attributes */
+   struct gl_hint_attrib	Hint;		/**< Hint attributes */
+   struct gl_light_attrib	Light;		/**< Light attributes */
+   struct gl_line_attrib	Line;		/**< Line attributes */
+   struct gl_list_attrib	List;		/**< List attributes */
+   struct gl_multisample_attrib Multisample;
+   struct gl_pixel_attrib	Pixel;		/**< Pixel attributes */
+   struct gl_point_attrib	Point;		/**< Point attributes */
+   struct gl_polygon_attrib	Polygon;	/**< Polygon attributes */
+   GLuint PolygonStipple[32];			/**< Polygon stipple */
+   struct gl_scissor_attrib	Scissor;	/**< Scissor attributes */
+   struct gl_stencil_attrib	Stencil;	/**< Stencil buffer attributes */
+   struct gl_texture_attrib	Texture;	/**< Texture attributes */
+   struct gl_transform_attrib	Transform;	/**< Transformation attributes */
+   struct gl_viewport_attrib	ViewportArray[MAX_VIEWPORTS];	/**< Viewport attributes */
+   GLuint SubpixelPrecisionBias[2];	/**< Viewport attributes */
+   /*@}*/
+
+   /** \name Client attribute stack */
+   /*@{*/
+   GLuint ClientAttribStackDepth;
+   struct gl_attrib_node *ClientAttribStack[MAX_CLIENT_ATTRIB_STACK_DEPTH];
+   /*@}*/
+
+   /** \name Client attribute groups */
+   /*@{*/
+   struct gl_array_attrib	Array;	/**< Vertex arrays */
+   struct gl_pixelstore_attrib	Pack;	/**< Pixel packing */
+   struct gl_pixelstore_attrib	Unpack;	/**< Pixel unpacking */
+   struct gl_pixelstore_attrib	DefaultPacking;	/**< Default params */
+   /*@}*/
+
+   /** \name Other assorted state (not pushed/popped on attribute stack) */
+   /*@{*/
+   struct gl_pixelmaps          PixelMaps;
+
+   struct gl_evaluators EvalMap;   /**< All evaluators */
+   struct gl_feedback   Feedback;  /**< Feedback */
+   struct gl_selection  Select;    /**< Selection */
+
+   struct gl_program_state Program;  /**< general program state */
+   struct gl_vertex_program_state VertexProgram;
+   struct gl_fragment_program_state FragmentProgram;
+   struct gl_geometry_program_state GeometryProgram;
+   struct gl_compute_program_state ComputeProgram;
+   struct gl_tess_ctrl_program_state TessCtrlProgram;
+   struct gl_tess_eval_program_state TessEvalProgram;
+   struct gl_ati_fragment_shader_state ATIFragmentShader;
+
+   struct gl_pipeline_shader_state Pipeline; /**< GLSL pipeline shader object state */
+   struct gl_pipeline_object Shader; /**< GLSL shader object state */
+
+   /**
+    * Current active shader pipeline state
+    *
+    * Almost all internal users want ::_Shader instead of ::Shader.  The
+    * exceptions are bits of legacy GLSL API that do not know about separate
+    * shader objects.
+    *
+    * If a program is active via \c glUseProgram, this will point to
+    * \c ::Shader.
+    *
+    * If a program pipeline is active via \c glBindProgramPipeline, this will
+    * point to \c ::Pipeline.Current.
+    *
+    * If neither a program nor a program pipeline is active, this will point to
+    * \c ::Pipeline.Default.  This ensures that \c ::_Shader will never be
+    * \c NULL.
+    */
+   struct gl_pipeline_object *_Shader;
+
+   struct gl_query_state Query;  /**< occlusion, timer queries */
+
+   struct gl_transform_feedback_state TransformFeedback;
+
+   struct gl_perf_monitor_state PerfMonitor;
+   struct gl_perf_query_state PerfQuery;
+
+   struct gl_buffer_object *DrawIndirectBuffer; /** < GL_ARB_draw_indirect */
+   struct gl_buffer_object *ParameterBuffer; /** < GL_ARB_indirect_parameters */
+   struct gl_buffer_object *DispatchIndirectBuffer; /** < GL_ARB_compute_shader */
+
+   struct gl_buffer_object *CopyReadBuffer; /**< GL_ARB_copy_buffer */
+   struct gl_buffer_object *CopyWriteBuffer; /**< GL_ARB_copy_buffer */
+
+   struct gl_buffer_object *QueryBuffer; /**< GL_ARB_query_buffer_object */
+
+   /**
+    * Current GL_ARB_uniform_buffer_object binding referenced by
+    * GL_UNIFORM_BUFFER target for glBufferData, glMapBuffer, etc.
+    */
+   struct gl_buffer_object *UniformBuffer;
+
+   /**
+    * Current GL_ARB_shader_storage_buffer_object binding referenced by
+    * GL_SHADER_STORAGE_BUFFER target for glBufferData, glMapBuffer, etc.
+    */
+   struct gl_buffer_object *ShaderStorageBuffer;
+
+   /**
+    * Array of uniform buffers for GL_ARB_uniform_buffer_object and GL 3.1.
+    * This is set up using glBindBufferRange() or glBindBufferBase().  They are
+    * associated with uniform blocks by glUniformBlockBinding()'s state in the
+    * shader program.
+    */
+   struct gl_buffer_binding
+      UniformBufferBindings[MAX_COMBINED_UNIFORM_BUFFERS];
+
+   /**
+    * Array of shader storage buffers for ARB_shader_storage_buffer_object
+    * and GL 4.3. This is set up using glBindBufferRange() or
+    * glBindBufferBase().  They are associated with shader storage blocks by
+    * glShaderStorageBlockBinding()'s state in the shader program.
+    */
+   struct gl_buffer_binding
+      ShaderStorageBufferBindings[MAX_COMBINED_SHADER_STORAGE_BUFFERS];
+
+   /**
+    * Object currently associated with the GL_ATOMIC_COUNTER_BUFFER
+    * target.
+    */
+   struct gl_buffer_object *AtomicBuffer;
+
+   /**
+    * Object currently associated w/ the GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD
+    * target.
+    */
+   struct gl_buffer_object *ExternalVirtualMemoryBuffer;
+
+   /**
+    * Array of atomic counter buffer binding points.
+    */
+   struct gl_buffer_binding
+      AtomicBufferBindings[MAX_COMBINED_ATOMIC_BUFFERS];
+
+   /**
+    * Array of image units for ARB_shader_image_load_store.
+    */
+   struct gl_image_unit ImageUnits[MAX_IMAGE_UNITS];
+
+   struct gl_subroutine_index_binding SubroutineIndex[MESA_SHADER_STAGES];
+   /*@}*/
+
+   struct gl_meta_state *Meta;  /**< for "meta" operations */
+
+   /* GL_EXT_framebuffer_object */
+   struct gl_renderbuffer *CurrentRenderbuffer;
+
+   GLenum16 ErrorValue;      /**< Last error code */
+
+   /**
+    * Recognize and silence repeated error debug messages in buggy apps.
+    */
+   const char *ErrorDebugFmtString;
+   GLuint ErrorDebugCount;
+
+   /* GL_ARB_debug_output/GL_KHR_debug */
+   simple_mtx_t DebugMutex;
+   struct gl_debug_state *Debug;
+
+   GLenum16 RenderMode;      /**< either GL_RENDER, GL_SELECT, GL_FEEDBACK */
+   GLbitfield NewState;      /**< bitwise-or of _NEW_* flags */
+   uint64_t NewDriverState;  /**< bitwise-or of flags from DriverFlags */
+
+   struct gl_driver_flags DriverFlags;
+
+   GLboolean ViewportInitialized;  /**< has viewport size been initialized? */
+
+   GLbitfield varying_vp_inputs;  /**< mask of VERT_BIT_* flags */
+
+   /** \name Derived state */
+   GLbitfield _ImageTransferState;/**< bitwise-or of IMAGE_*_BIT flags */
+   GLfloat _EyeZDir[3];
+   GLfloat _ModelViewInvScale; /* may be for model- or eyespace lighting */
+   GLfloat _ModelViewInvScaleEyespace; /* always factor defined in spec */
+   GLboolean _NeedEyeCoords;
+   GLboolean _ForceEyeCoords;
+
+   GLuint TextureStateTimestamp; /**< detect changes to shared state */
+
+   struct gl_list_extensions *ListExt; /**< driver dlist extensions */
+
+   /** \name For debugging/development only */
+   /*@{*/
+   GLboolean FirstTimeCurrent;
+   /*@}*/
+
+   /**
+    * False if this context was created without a config. This is needed
+    * because the initial state of glDrawBuffers depends on this
+    */
+   GLboolean HasConfig;
+
+   GLboolean TextureFormatSupported[MESA_FORMAT_COUNT];
+
+   GLboolean RasterDiscard;  /**< GL_RASTERIZER_DISCARD */
+   GLboolean IntelConservativeRasterization; /**< GL_CONSERVATIVE_RASTERIZATION_INTEL */
+   GLboolean ConservativeRasterization; /**< GL_CONSERVATIVE_RASTERIZATION_NV */
+   GLfloat ConservativeRasterDilate;
+   GLenum16 ConservativeRasterMode;
+
+   /** Does glVertexAttrib(0) alias glVertex()? */
+   bool _AttribZeroAliasesVertex;
+
+   /**
+    * When set, TileRasterOrderIncreasingX/Y control the order that a tiled
+    * renderer's tiles should be excecuted, to meet the requirements of
+    * GL_MESA_tile_raster_order.
+    */
+   GLboolean TileRasterOrderFixed;
+   GLboolean TileRasterOrderIncreasingX;
+   GLboolean TileRasterOrderIncreasingY;
+
+   /**
+    * \name Hooks for module contexts.
+    *
+    * These will eventually live in the driver or elsewhere.
+    */
+   /*@{*/
+   void *swrast_context;
+   void *swsetup_context;
+   void *swtnl_context;
+   struct vbo_context *vbo_context;
+   struct st_context *st;
+   void *aelt_context;
+   /*@}*/
+
+   /**
+    * \name NV_vdpau_interop
+    */
+   /*@{*/
+   const void *vdpDevice;
+   const void *vdpGetProcAddress;
+   struct set *vdpSurfaces;
+   /*@}*/
+
+   /**
+    * Has this context observed a GPU reset in any context in the share group?
+    *
+    * Once this field becomes true, it is never reset to false.
+    */
+   GLboolean ShareGroupReset;
+
+   /**
+    * \name OES_primitive_bounding_box
+    *
+    * Stores the arguments to glPrimitiveBoundingBox
+    */
+   GLfloat PrimitiveBoundingBox[8];
+
+   struct disk_cache *Cache;
+
+   /**
+    * \name GL_ARB_bindless_texture
+    */
+   /*@{*/
+   struct hash_table_u64 *ResidentTextureHandles;
+   struct hash_table_u64 *ResidentImageHandles;
+   /*@}*/
+}
+
+
+
+
+/**
+ * Initialize a context's exec table with pointers to Mesa's supported
+ * GL functions.
+ *
+ * This function depends on ctx->Version.
+ *
+ * \param ctx  GL context to which \c exec belongs.
+ */
 void
-os_log_message(const char *message)
+_mesa_initialize_exec_table(struct gl_context *ctx)
 {
-   /* If the GALLIUM_LOG_FILE environment variable is set to a valid filename,
-    * write all messages to that file.
-    */
-   static FILE *fout = NULL;
+   struct _glapi_table *exec;
 
-   if (!fout) {
-#ifdef DEBUG            
-      /* one-time init */
-      const char *filename = os_get_option("GALLIUM_LOG_FILE");
-      if (filename) {
-         const char *mode = "w";
-         if (filename[0] == '+') {
-            /* If the filename is prefixed with '+' then open the file for
-             * appending instead of normal writing.
-             */
-            mode = "a";
-            filename++; /* skip the '+' */
-         }
-         fout = fopen(filename, mode);
-      }
-#endif
-      if (!fout)
-         fout = stderr;
-   }
+   exec = ctx->Exec;
+   assert(exec != NULL);
 
-#if defined(PIPE_SUBSYSTEM_WINDOWS_USER)
-   OutputDebugStringA(message);
-   if(GetConsoleWindow() && !IsDebuggerPresent()) {
-      fflush(stdout);
-      fputs(message, fout);
-      fflush(fout);
-   }
-   else if (fout != stderr) {
-      fputs(message, fout);
-      fflush(fout);
-   }
-#else /* !PIPE_SUBSYSTEM_WINDOWS */
-   fflush(stdout);
-   fputs(message, fout);
-   fflush(fout);Gallium environment variables 
-   fflush (message)
+   assert(ctx->Version > 0);
 
-#endif
+   _mesa_initialize_exec_dispatch(ctx, exec);
+
+   if (!_mesa_is_no_error_enabled(ctx) && (_mesa_is_desktop_gl(ctx) || (ctx->API == API_OPENGLES2 && ctx->Version >= 30))) {
+      SET_BeginTransformFeedback(exec, _mesa_BeginTransformFeedback);
+      SET_BindBufferRange(exec, _mesa_BindBufferRange);
+      SET_BindFragDataLocation(exec, _mesa_BindFragDataLocation);
+      SET_BindFragDataLocationIndexed(exec, _mesa_BindFragDataLocationIndexed);
+      SET_BindSampler(exec, _mesa_BindSampler);
+      SET_BindTransformFeedback(exec, _mesa_BindTransformFeedback);
+      SET_BlendEquationSeparateiARB(exec, _mesa_BlendEquationSeparateiARB);
+      SET_BlendEquationiARB(exec, _mesa_BlendEquationiARB);
+
+
+
+
+
+/**
+ * \file main/dispatch.h
+ * Macros for handling GL dispatch tables.
+ *
+ * For each known GL function, there are 3 macros in this file.  The first
+ * macro is named CALL_FuncName and is used to call that GL function using
+ * the specified dispatch table.  The other 2 macros, called GET_FuncName
+ * can SET_FuncName, are used to get and set the dispatch pointer for the
+ * named function in the specified dispatch table.
+ */
+
+#define CALL_by_offset(disp, cast, offset, parameters) \
+    (*(cast (GET_by_offset(disp, offset)))) parameters
+#define GET_by_offset(disp, offset) \
+    (offset >= 0) ? (((_glapi_proc *)(disp))[offset]) : NULL
+#define SET_by_offset(disp, offset, fn) \
+    do { \
+        if ( (offset) < 0 ) { \
+            /* fprintf( stderr, "[%s:%u] SET_by_offset(%p, %d, %s)!\n", */ \
+            /*         __func__, __LINE__, disp, offset, # fn); */ \
+            /* abort(); */ \
+        } \
+        else { \
+            ( (_glapi_proc *) (disp) )[offset] = (_glapi_proc) fn; \
+        } \
+    } while(0)
+
+
+db) p _mesa_Clear
+$28 = {void (GLbitfield)} 0x7ffff69ec740 <_mesa_Clear>
+(gdb) 
+
+
+
+
+
+typedef void (GLAPIENTRYP _glptr_Clear)(GLbitfield);
+#define CALL_Clear(disp, parameters) \
+    (* GET_Clear(disp)) parameters
+static inline _glptr_Clear GET_Clear(struct _glapi_table *disp) {
+   return (_glptr_Clear) (GET_by_offset(disp, _gloffset_Clear));
 }
-
-```
-
-## Gallium environment variables
-
-
-
-Gallium environment variables 
-fflush (message)
-
-
-
-
-
-
-
-
-static void
-draw_llvm_generate(struct draw_llvm *llvm, struct draw_llvm_variant *variant)
-{
-   struct gallivm_state *gallivm = variant->gallivm;
-   LLVMContextRef context = gallivm->context;
-   LLVMTypeRef int32_type = LLVMInt32TypeInContext(context);
-   LLVMTypeRef arg_types[11];
-   unsigned num_arg_types = ARRAY_SIZE(arg_types);
-   LLVMTypeRef func_type;
-   LLVMValueRef context_ptr;
-   LLVMBasicBlockRef block;
-   LLVMBuilderRef builder;
-   char func_name[64];
-   struct lp_type vs_type;
-   LLVMValueRef count, fetch_elts, start_or_maxelt;
-   LLVMValueRef vertex_id_offset, start_instance;
-   LLVMValueRef stride, step, io_itr;
-   LLVMValueRef ind_vec, start_vec, have_elts, fetch_max, tmp;
-   LLVMValueRef io_ptr, vbuffers_ptr, vb_ptr;
-   LLVMValueRef vb_stride[PIPE_MAX_ATTRIBS];
-   LLVMValueRef map_ptr[PIPE_MAX_ATTRIBS];
-   LLVMValueRef buffer_size_adj[PIPE_MAX_ATTRIBS];
-   LLVMValueRef instance_index[PIPE_MAX_ATTRIBS];
-   LLVMValueRef fake_buf_ptr, fake_buf;
-
-   struct draw_context *draw = llvm->draw;
-   const struct tgsi_shader_info *vs_info = &draw->vs.vertex_shader->info;
-   unsigned i, j;
-   struct lp_build_context bld, blduivec;
-   struct lp_build_loop_state lp_loop;
-   struct lp_build_if_state if_ctx;
-   const int vector_length = lp_native_vector_width / 32;
-   LLVMValueRef outputs[PIPE_MAX_SHADER_OUTPUTS][TGSI_NUM_CHANNELS];
-   struct lp_build_sampler_soa *sampler = 0;
-   LLVMValueRef ret, clipmask_bool_ptr;
-   struct draw_llvm_variant_key *key = &variant->key;
-   /* If geometry shader is present we need to skip both the viewport
-    * transformation and clipping otherwise the inputs to the geometry
-    * shader will be incorrect.
-    * The code can't handle vp transform when vs writes vp index neither
-    * (though this would be fixable here, but couldn't just broadcast
-    * the values).
-    */
-   const boolean bypass_viewport = key->has_gs || key->bypass_viewport ||
-                                   vs_info->writes_viewport_index;
-   const boolean enable_cliptest = !key->has_gs && (key->clip_xy ||
-                                                    key->clip_z ||
-                                                    key->clip_user ||
-                                                    key->need_edgeflags);
-   LLVMValueRef variant_func;
-   const unsigned pos = draw->vs.position_output;
-   const unsigned cv = draw->vs.clipvertex_output;
-   boolean have_clipdist = FALSE;
-   struct lp_bld_tgsi_system_values system_values;
-
-   memset(&system_values, 0, sizeof(system_values));
-
-   util_snprintf(func_name, sizeof(func_name), "draw_llvm_vs_variant%u",
-                 variant->shader->variants_cached);
-
-   i = 0;
-   arg_types[i++] = get_context_ptr_type(variant);       /* context */
-   arg_types[i++] = get_vertex_header_ptr_type(variant); /* vertex_header */
-   arg_types[i++] = get_buffer_ptr_type(variant);        /* vbuffers */
-   arg_types[i++] = int32_type;                          /* count */
-   arg_types[i++] = int32_type;                          /* start/fetch_elt_max */
-   arg_types[i++] = int32_type;                          /* stride */
-   arg_types[i++] = get_vb_ptr_type(variant);            /* pipe_vertex_buffer's */
-   arg_types[i++] = int32_type;                          /* instance_id */
-   arg_types[i++] = int32_type;                          /* vertex_id_offset */
-   arg_types[i++] = int32_type;                          /* start_instance */
-   arg_types[i++] = LLVMPointerType(int32_type, 0);      /* fetch_elts  */
-
-   func_type = LLVMFunctionType(LLVMInt8TypeInContext(context),
-                                arg_types, num_arg_types, 0);
-
-   variant_func = LLVMAddFunction(gallivm->module, func_name, func_type);
-   variant->function = variant_func;
-
-   LLVMSetFunctionCallConv(variant_func, LLVMCCallConv);
-   for (i = 0; i < num_arg_types; ++i)
-      if (LLVMGetTypeKind(arg_types[i]) == LLVMPointerTypeKind)
-         lp_add_function_attr(variant_func, i + 1, LP_FUNC_ATTR_NOALIAS);
-
-   context_ptr               = LLVMGetParam(variant_func, 0);
-   io_ptr                    = LLVMGetParam(variant_func, 1);
-   vbuffers_ptr              = LLVMGetParam(variant_func, 2);
-   count                     = LLVMGetParam(variant_func, 3);
-   /*
-    * XXX: the maxelt part is unused. Not really useful, since we cannot
-    * get index buffer overflows due to vsplit (which provides its own
-    * elts buffer, with a different size than what's passed in here).
-    */
-   start_or_maxelt           = LLVMGetParam(variant_func, 4);
-   /*
-    * XXX: stride is actually unused. The stride we use is strictly calculated
-    * from the number of outputs (including the draw_extra outputs).
-    * Should probably fix some day (we need a new vs just because of extra
-    * outputs which the generated vs won't touch).
-    */
-   stride                    = LLVMGetParam(variant_func, 5);
-   vb_ptr                    = LLVMGetParam(variant_func, 6);
-   system_values.instance_id = LLVMGetParam(variant_func, 7);
-   vertex_id_offset          = LLVMGetParam(variant_func, 8);
-   start_instance            = LLVMGetParam(variant_func, 9);
-   fetch_elts                = LLVMGetParam(variant_func, 10);
-
-   lp_build_name(context_ptr, "context");
-   lp_build_name(io_ptr, "io");
-   lp_build_name(vbuffers_ptr, "vbuffers");
-   lp_build_name(count, "count");
-   lp_build_name(start_or_maxelt, "start_or_maxelt");
-   lp_build_name(stride, "stride");
-   lp_build_name(vb_ptr, "vb");
-   lp_build_name(system_values.instance_id, "instance_id");
-   lp_build_name(vertex_id_offset, "vertex_id_offset");
-   lp_build_name(start_instance, "start_instance");
-   lp_build_name(fetch_elts, "fetch_elts");
-
-   /*
-    * Function body
-    */
-
-   block = LLVMAppendBasicBlockInContext(gallivm->context, variant_func, "entry");
-   builder = gallivm->builder;
-   LLVMPositionBuilderAtEnd(builder, block);
-
-   memset(&vs_type, 0, sizeof vs_type);
-   vs_type.floating = TRUE; /* floating point values */
-   vs_type.sign = TRUE;     /* values are signed */
-   vs_type.norm = FALSE;    /* values are not limited to [0,1] or [-1,1] */
-   vs_type.width = 32;      /* 32-bit float */
-   vs_type.length = vector_length;
-
-   lp_build_context_init(&bld, gallivm, lp_type_uint(32));
-   lp_build_context_init(&blduivec, gallivm, lp_uint_type(vs_type));
-
-   /* hold temporary "bool" clipmask */
-   clipmask_bool_ptr = lp_build_alloca(gallivm, blduivec.vec_type, "");
-
-   fake_buf = lp_build_alloca_undef(gallivm,
-                 LLVMVectorType(LLVMInt64TypeInContext(context), 4), "");
-   fake_buf = LLVMBuildBitCast(builder, fake_buf,
-                 LLVMPointerType(LLVMInt8TypeInContext(context), 0), "");
-   fake_buf_ptr = LLVMBuildGEP(builder, fake_buf, &bld.zero, 1, "");
-
-   /* code generated texture sampling */
-   sampler = draw_llvm_sampler_soa_create(draw_llvm_variant_key_samplers(key));
-
-   step = lp_build_const_int32(gallivm, vector_length);
-
-   ind_vec = blduivec.undef;
-   for (i = 0; i < vs_type.length; i++) {
-      LLVMValueRef index = lp_build_const_int32(gallivm, i);
-      ind_vec = LLVMBuildInsertElement(builder, ind_vec, index, index, "");
-   }
-
-   have_elts = LLVMBuildICmp(builder, LLVMIntNE,
-                             LLVMConstPointerNull(arg_types[10]), fetch_elts, "");
-
-   fetch_max = LLVMBuildSub(builder, count, bld.one, "fetch_max");
-   fetch_max = lp_build_broadcast_scalar(&blduivec, fetch_max);
-   /*
-    * Only needed for non-indexed path.
-    */
-   start_vec = lp_build_broadcast_scalar(&blduivec, start_or_maxelt);
-
-   /*
-    * Pre-calculate everything which is constant per shader invocation.
-    */
-   for (j = 0; j < key->nr_vertex_elements; ++j) {
-      LLVMValueRef vb_buffer_offset, buffer_size, temp_ptr;
-      LLVMValueRef vb_info, vbuffer_ptr, buf_offset, ofbit;
-      struct pipe_vertex_element *velem = &key->vertex_element[j];
-      LLVMValueRef vb_index =
-         lp_build_const_int32(gallivm, velem->vertex_buffer_index);
-      LLVMValueRef bsize = lp_build_const_int32(gallivm,
-                                                util_format_get_blocksize(velem->src_format));
-      LLVMValueRef src_offset = lp_build_const_int32(gallivm,
-                                                     velem->src_offset);
-      struct lp_build_if_state if_ctx;
-
-      if (velem->src_format != PIPE_FORMAT_NONE) {
-         vbuffer_ptr = LLVMBuildGEP(builder, vbuffers_ptr, &vb_index, 1, "");
-         vb_info = LLVMBuildGEP(builder, vb_ptr, &vb_index, 1, "");
-         vb_stride[j] = draw_jit_vbuffer_stride(gallivm, vb_info);
-         vb_stride[j] = LLVMBuildZExt(gallivm->builder, vb_stride[j],
-                                      LLVMInt32TypeInContext(context), "");
-         vb_buffer_offset = draw_jit_vbuffer_offset(gallivm, vb_info);
-         map_ptr[j] = draw_jit_dvbuffer_map(gallivm, vbuffer_ptr);
-         buffer_size = draw_jit_dvbuffer_size(gallivm, vbuffer_ptr);
-
-         ofbit = NULL;
-         /*
-          * We'll set buffer_size_adj to zero if we have of, so it will
-          * always overflow later automatically without having to keep ofbit.
-          * Overflows (with normal wraparound) doing the actual offset
-          * calculation should be ok, just not for the buffer size calc.
-          * It would also be possible to detect such overflows and return
-          * zeros if that happens, but this would be more complex.
-          */
-         buf_offset = lp_build_add(&bld, vb_buffer_offset, src_offset);
-         tmp = lp_build_sub(&bld, bsize, bld.one);
-         buffer_size_adj[j] = lp_build_usub_overflow(gallivm, buffer_size, tmp,
-                                                     &ofbit);
-         buffer_size_adj[j] = lp_build_usub_overflow(gallivm, buffer_size_adj[j],
-                                                     buf_offset, &ofbit);
-
-         /*
-          * We can't easily set fake vertex buffers outside the generated code.
-          * Hence, set fake vertex buffers here instead basically, so fetch
-          * code can always fetch using offset 0, eliminating all control flow
-          * inside the main loop.
-          * (Alternatively, could have control flow per vector skipping fetch
-          * if ofbit is true.)
-          */
-         if (velem->instance_divisor) {
-            /*
-             * Index is equal to the start instance plus the number of current
-             * instance divided by the divisor. In this case we compute it as:
-             * index = start_instance + (instance_id  / divisor).
-             * Note we could actually do the fetch here, outside the loop -
-             * it's all constant, hopefully llvm recognizes this.
-             */
-            LLVMValueRef current_instance;
-            current_instance = LLVMBuildUDiv(builder, system_values.instance_id,
-                                             lp_build_const_int32(gallivm,
-                                                                  velem->instance_divisor),
-                                             "instance_divisor");
-            instance_index[j] = lp_build_uadd_overflow(gallivm, start_instance,
-                                                       current_instance, &ofbit);
-         }
-
-         buffer_size_adj[j] = LLVMBuildSelect(builder, ofbit, bld.zero,
-                                              buffer_size_adj[j], "");
-
-         temp_ptr = lp_build_alloca_undef(gallivm,
-                       LLVMPointerType(LLVMInt8TypeInContext(context), 0), "");
-
-         lp_build_if(&if_ctx, gallivm, ofbit);
-         {
-            LLVMBuildStore(builder, fake_buf_ptr, temp_ptr);
-         }
-         lp_build_else(&if_ctx);
-         {
-            map_ptr[j] = LLVMBuildGEP(builder, map_ptr[j], &buf_offset, 1, "");
-            LLVMBuildStore(builder, map_ptr[j], temp_ptr);
-         }
-         lp_build_endif(&if_ctx);
-         map_ptr[j] = LLVMBuildLoad(builder, temp_ptr, "map_ptr");
-
-         if (0) {
-            lp_build_printf(gallivm, "velem %d, vbuf index = %u, vb_stride = %u\n",
-                            lp_build_const_int32(gallivm, j),
-                            vb_index, vb_stride[j]);
-            lp_build_printf(gallivm,
-                            "   vb_buffer_offset = %u, src_offset = %u, buf_offset = %u\n",
-                            vb_buffer_offset, src_offset, buf_offset);
-            lp_build_printf(gallivm, "   buffer size = %u, blocksize = %u\n",
-                            buffer_size, bsize);
-            lp_build_printf(gallivm, "   instance_id = %u\n", system_values.instance_id);
-         }
-      }
-   }
-
-   lp_build_loop_begin(&lp_loop, gallivm, bld.zero);
-   {
-      LLVMValueRef inputs[PIPE_MAX_SHADER_INPUTS][TGSI_NUM_CHANNELS];
-      LLVMValueRef io;
-      LLVMValueRef clipmask;   /* holds the clipmask value */
-      LLVMValueRef true_index_array, index_store;
-      const LLVMValueRef (*ptr_aos)[TGSI_NUM_CHANNELS];
-
-      io_itr = lp_loop.counter;
-
-      io = LLVMBuildGEP(builder, io_ptr, &io_itr, 1, "");
-#if DEBUG_STORE
-      lp_build_printf(gallivm, " --- io %d = %p, loop counter %d\n",
-                      io_itr, io, lp_loop.counter);
-#endif
-
-      true_index_array = lp_build_broadcast_scalar(&blduivec, lp_loop.counter);
-      true_index_array = LLVMBuildAdd(builder, true_index_array, ind_vec, "");
-
-      /*
-       * Limit indices to fetch_max, otherwise might try to access indices
-       * beyond index buffer (or rather vsplit elt buffer) size.
-       * Could probably safely (?) skip this for non-indexed draws and
-       * simplify things minimally (by removing it could combine the ind_vec
-       * and start_vec adds). I think the only effect for non-indexed draws will
-       * be that for the invalid elements they will be all fetched from the
-       * same location as the last valid one, but noone should really care.
-       */
-      true_index_array = lp_build_min(&blduivec, true_index_array, fetch_max);
-
-      index_store = lp_build_alloca_undef(gallivm, blduivec.vec_type, "index_store");
-
-      lp_build_if(&if_ctx, gallivm, have_elts);
-      {
-         /*
-          * Note: you'd expect some comparison/clamp against fetch_elt_max
-          * here.
-          * There used to be one here but it was incorrect: overflow was
-          * detected if index > fetch_elt_max - but the correct condition
-          * would be index >= fetch_elt_max (since this is just size of elts
-          * buffer / element size).
-          * Using the correct condition however will cause failures - due to
-          * vsplit/vcache code which rebases indices. So, as an example, if
-          * fetch_elt_max is just 1 and fetch_count 2, vsplit cache will
-          * replace all invalid indices with 0 - which in case of elt_bias
-          * not being zero will get a different fetch index than the valid
-          * index 0. So, just rely on vsplit code preventing out-of-bounds
-          * fetches. This is also why it's safe to do elts fetch even if there
-          * was no index buffer bound - the real buffer is never seen here, at
-          * least not if there are index buffer overflows...
-          */
-
-         /*
-          * XXX should not have to do this, as scale can be handled
-          * natively by loads (hits asserts though).
-          */
-         tmp = lp_build_shl_imm(&blduivec, true_index_array, 2);
-         fetch_elts = LLVMBuildBitCast(builder, fetch_elts,
-                                       LLVMPointerType(LLVMInt8TypeInContext(context),
-                                                       0), "");
-         tmp = lp_build_gather(gallivm, vs_type.length,
-                               32, bld.type, TRUE,
-                               fetch_elts, tmp, FALSE);
-         LLVMBuildStore(builder, tmp, index_store);
-      }
-      lp_build_else(&if_ctx);
-      {
-         tmp = LLVMBuildAdd(builder, true_index_array, start_vec, "");
-         LLVMBuildStore(builder, tmp, index_store);
-      }
-      lp_build_endif(&if_ctx);
-
-      true_index_array = LLVMBuildLoad(builder, index_store, "");
-
-      for (j = 0; j < key->nr_vertex_elements; ++j) {
-         struct pipe_vertex_element *velem = &key->vertex_element[j];
-         const struct util_format_description *format_desc =
-            util_format_description(velem->src_format);
-
-         if (format_desc->format == PIPE_FORMAT_NONE) {
-            for (i = 0; i < TGSI_NUM_CHANNELS; i++) {
-               inputs[j][i] = lp_build_zero(gallivm, vs_type);
-            }
-         }
-         else if (velem->instance_divisor) {
-            fetch_instanced(gallivm, format_desc, vs_type,
-                            vb_stride[j], map_ptr[j],
-                            buffer_size_adj[j],
-                            inputs[j], instance_index[j]);
-         }
-         else {
-            fetch_vector(gallivm, format_desc, vs_type,
-                         vb_stride[j], map_ptr[j],
-                         buffer_size_adj[j],
-                         inputs[j], true_index_array);
-         }
-      }
-
-      /* In the paths with elts vertex id has to be unaffected by the
-       * index bias and because indices inside our elements array have
-       * already had index bias applied we need to subtract it here to
-       * get back to the original index.
-       * in the linear paths vertex id has to be unaffected by the
-       * original start index and because we abuse the 'start' variable
-       * to either represent the actual start index or the index at which
-       * the primitive was split (we split rendering into chunks of at
-       * most 4095-vertices) we need to back out the original start
-       * index out of our vertex id here.
-       */
-      system_values.basevertex = lp_build_broadcast_scalar(&blduivec,
-                                                           vertex_id_offset);
-      system_values.vertex_id = true_index_array;
-      system_values.vertex_id_nobase = LLVMBuildSub(builder, true_index_array,
-                                                      system_values.basevertex, "");
-
-      ptr_aos = (const LLVMValueRef (*)[TGSI_NUM_CHANNELS]) inputs;
-      generate_vs(variant,
-                  builder,
-                  vs_type,
-                  outputs,
-                  ptr_aos,
-                  &system_values,
-                  context_ptr,
-                  sampler,
-                  key->clamp_vertex_color);
-
-      if (pos != -1 && cv != -1) {
-         /* store original positions in clip before further manipulation */
-         store_clip(gallivm, vs_type, io, outputs, pos);
-
-         /* do cliptest */
-         if (enable_cliptest) {
-            LLVMValueRef temp = LLVMBuildLoad(builder, clipmask_bool_ptr, "");
-            /* allocate clipmask, assign it integer type */
-            clipmask = generate_clipmask(llvm,
-                                         gallivm,
-                                         vs_type,
-                                         outputs,
-                                         key,
-                                         context_ptr, &have_clipdist);
-            temp = LLVMBuildOr(builder, clipmask, temp, "");
-            /* store temporary clipping boolean value */
-            LLVMBuildStore(builder, temp, clipmask_bool_ptr);
-         }
-         else {
-            clipmask = blduivec.zero;
-         }
-
-         /* do viewport mapping */
-         if (!bypass_viewport) {
-            generate_viewport(variant, builder, vs_type, outputs, context_ptr);
-         }
-      }
-      else {
-         clipmask = blduivec.zero;
-      }
-
-      /* store clipmask in vertex header,
-       * original positions in clip
-       * and transformed positions in data
-       */
-      convert_to_aos(gallivm, io, NULL, outputs, clipmask,
-                     vs_info->num_outputs, vs_type,
-                     enable_cliptest && key->need_edgeflags);
-   }
-   lp_build_loop_end_cond(&lp_loop, count, step, LLVMIntUGE);
-
-   sampler->destroy(sampler);
-
-   /* return clipping boolean value for function */
-   ret = clipmask_booli8(gallivm, vs_type, clipmask_bool_ptr,
-                         enable_cliptest && key->need_edgeflags);
-
-   LLVMBuildRet(builder, ret);
-
-   gallivm_verify_function(gallivm, variant_func);
-}
-
-
-\VERT
-PROPERTY NEXT_SHADER FRAG
-DCL IN[0]
-DCL IN[1]
-DCL IN[2]
-DCL OUT[0], POSITION
-DCL OUT[1], COLOR
-DCL OUT[2], GENERIC[0]
-  0: MOV OUT[0], IN[0]
-  1: MOV OUT[1], IN[1]
-  2: MOV OUT[2], IN[2]
-  3: END
-clamp_vertex_color = 0
-clip_xy = 1
-clip_z = 1
-clip_user = 0
-bypass_viewport = 0
-clip_halfz = 0
-need_edgeflags = 0
-has_gs = 0
-ucp_enable = 0
-vertex_element[0].src_offset = 0
-vertex_element[0].instance_divisor = 0
-vertex_element[0].vertex_buffer_index = 0
-vertex_element[0].src_format = PIPE_FORMAT_R32G32B32_FLOAT
-vertex_element[1].src_offset = 12
-vertex_element[1].instance_divisor = 0
-vertex_element[1].vertex_buffer_index = 0
-vertex_element[1].src_format = PIPE_FORMAT_R32G32B32A32_FLOAT
-vertex_element[2].src_offset = 28
-vertex_element[2].instance_divisor = 0
-vertex_element[2].vertex_buffer_index = 0
-vertex_element[2].src_format = PIPE_FORMAT_R32G32_FLOAT
-
-; Function Attrs: nounwind readnone speculatable
-declare { i32, i1 } @llvm.usub.with.overflow.i32(i32, i32) #0
-
-; Function Attrs: argmemonly nounwind readonly
-declare <8 x i32> @llvm.x86.avx2.gather.d.d.256(<8 x i32>, i8*, <8 x i32>, <8 x i32>, i8) #1
-
-; Function Attrs: nounwind readnone speculatable
-declare <8 x float> @llvm.fmuladd.v8f32(<8 x float>, <8 x float>, <8 x float>) #0
-
-define i8 @draw_llvm_vs_variant0({ [16 x float*], [16 x i32], [14 x [4 x float]]*, float*, [128 x { i32, i32, i32, i32, i32, i8*, [16 x i32], [16 x i32], [16 x i32] }], [32 x { float, float, float, [4 x float] }] }* noalias %context, { i32, [4 x float], [3 x [4 x float]] }* noalias %io, { i8*, i32 }* noalias %vbuffers, i32 %count, i32 %start_or_maxelt, i32 %stride, { i16, i8, i32, i8* }* noalias %vb, i32 %instance_id, i32 %vertex_id_offset, i32 %start_instance, i32* noalias %fetch_elts) {
-entry:
-  %output46 = alloca <8 x float>
-  %output45 = alloca <8 x float>
-  %output44 = alloca <8 x float>
-  %output43 = alloca <8 x float>
-  %output42 = alloca <8 x float>
-  %output41 = alloca <8 x float>
-  %output40 = alloca <8 x float>
-  %output39 = alloca <8 x float>
-  %output38 = alloca <8 x float>
-  %output37 = alloca <8 x float>
-  %output36 = alloca <8 x float>
-  %output = alloca <8 x float>
-  %looplimiter = alloca i32
-  %index_store = alloca <8 x i32>
-  %loop_counter = alloca i32
-  %0 = alloca i8*
-  %1 = alloca i8*
-  %2 = alloca i8*
-  %3 = alloca <4 x i64>
-  %4 = alloca <8 x i32>
-  store <8 x i32> zeroinitializer, <8 x i32>* %4
-  %5 = bitcast <4 x i64>* %3 to i8*
-  %6 = getelementptr i8, i8* %5, i32 0
-  %7 = icmp ne i32* null, %fetch_elts
-  %fetch_max = sub i32 %count, 1
-  %8 = insertelement <8 x i32> undef, i32 %fetch_max, i32 0
-  %9 = shufflevector <8 x i32> %8, <8 x i32> undef, <8 x i32> zeroinitializer
-  %10 = insertelement <8 x i32> undef, i32 %start_or_maxelt, i32 0
-  %11 = shufflevector <8 x i32> %10, <8 x i32> undef, <8 x i32> zeroinitializer
-  %12 = getelementptr { i8*, i32 }, { i8*, i32 }* %vbuffers, i32 0
-  %13 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %vb, i32 0
-  %.stride_ptr = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %13, i32 0, i32 0
-  %.stride = load i16, i16* %.stride_ptr
-  %14 = zext i16 %.stride to i32
-  %.buffer_offset_ptr = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %13, i32 0, i32 2
-  %.buffer_offset = load i32, i32* %.buffer_offset_ptr
-  %.map_ptr = getelementptr { i8*, i32 }, { i8*, i32 }* %12, i32 0, i32 0
-  %.map = load i8*, i8** %.map_ptr
-  %.size_ptr = getelementptr { i8*, i32 }, { i8*, i32 }* %12, i32 0, i32 1
-  %.size = load i32, i32* %.size_ptr
-  %15 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %.size, i32 11) #2
-  %16 = extractvalue { i32, i1 } %15, 1
-  %17 = extractvalue { i32, i1 } %15, 0
-  %18 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %17, i32 %.buffer_offset) #2
-  %19 = extractvalue { i32, i1 } %18, 1
-  %20 = or i1 %16, %19
-  %21 = extractvalue { i32, i1 } %18, 0
-  %22 = select i1 %20, i32 0, i32 %21
-  br i1 %20, label %if-true-block, label %if-false-block
-
-if-true-block:                                    ; preds = %entry
-  store i8* %6, i8** %2
-  br label %endif-block
-
-if-false-block:                                   ; preds = %entry
-  %23 = getelementptr i8, i8* %.map, i32 %.buffer_offset
-  store i8* %23, i8** %2
-  br label %endif-block
-
-endif-block:                                      ; preds = %if-false-block, %if-true-block
-  %map_ptr = load i8*, i8** %2
-  %24 = getelementptr { i8*, i32 }, { i8*, i32 }* %vbuffers, i32 0
-  %25 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %vb, i32 0
-  %.stride_ptr1 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %25, i32 0, i32 0
-  %.stride2 = load i16, i16* %.stride_ptr1
-  %26 = zext i16 %.stride2 to i32
-  %.buffer_offset_ptr3 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %25, i32 0, i32 2
-  %.buffer_offset4 = load i32, i32* %.buffer_offset_ptr3
-  %.map_ptr5 = getelementptr { i8*, i32 }, { i8*, i32 }* %24, i32 0, i32 0
-  %.map6 = load i8*, i8** %.map_ptr5
-  %.size_ptr7 = getelementptr { i8*, i32 }, { i8*, i32 }* %24, i32 0, i32 1
-  %.size8 = load i32, i32* %.size_ptr7
-  %27 = add i32 %.buffer_offset4, 12
-  %28 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %.size8, i32 15) #2
-  %29 = extractvalue { i32, i1 } %28, 1
-  %30 = extractvalue { i32, i1 } %28, 0
-  %31 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %30, i32 %27) #2
-  %32 = extractvalue { i32, i1 } %31, 1
-  %33 = or i1 %29, %32
-  %34 = extractvalue { i32, i1 } %31, 0
-  %35 = select i1 %33, i32 0, i32 %34
-  br i1 %33, label %if-true-block10, label %if-false-block11
-
-if-true-block10:                                  ; preds = %endif-block
-  store i8* %6, i8** %1
-  br label %endif-block9
-
-if-false-block11:                                 ; preds = %endif-block
-  %36 = getelementptr i8, i8* %.map6, i32 %27
-  store i8* %36, i8** %1
-  br label %endif-block9
-
-endif-block9:                                     ; preds = %if-false-block11, %if-true-block10
-  %map_ptr12 = load i8*, i8** %1
-  %37 = getelementptr { i8*, i32 }, { i8*, i32 }* %vbuffers, i32 0
-  %38 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %vb, i32 0
-  %.stride_ptr13 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %38, i32 0, i32 0
-  %.stride14 = load i16, i16* %.stride_ptr13
-  %39 = zext i16 %.stride14 to i32
-  %.buffer_offset_ptr15 = getelementptr { i16, i8, i32, i8* }, { i16, i8, i32, i8* }* %38, i32 0, i32 2
-  %.buffer_offset16 = load i32, i32* %.buffer_offset_ptr15
-  %.map_ptr17 = getelementptr { i8*, i32 }, { i8*, i32 }* %37, i32 0, i32 0
-  %.map18 = load i8*, i8** %.map_ptr17
-  %.size_ptr19 = getelementptr { i8*, i32 }, { i8*, i32 }* %37, i32 0, i32 1
-  %.size20 = load i32, i32* %.size_ptr19
-  %40 = add i32 %.buffer_offset16, 28
-  %41 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %.size20, i32 7) #2
-  %42 = extractvalue { i32, i1 } %41, 1
-  %43 = extractvalue { i32, i1 } %41, 0
-  %44 = call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %43, i32 %40) #2
-  %45 = extractvalue { i32, i1 } %44, 1
-  %46 = or i1 %42, %45
-  %47 = extractvalue { i32, i1 } %44, 0
-  %48 = select i1 %46, i32 0, i32 %47
-  br i1 %46, label %if-true-block22, label %if-false-block23
-
-if-true-block22:                                  ; preds = %endif-block9
-  store i8* %6, i8** %0
-  br label %endif-block21
-
-if-false-block23:                                 ; preds = %endif-block9
-  %49 = getelementptr i8, i8* %.map18, i32 %40
-  store i8* %49, i8** %0
-  br label %endif-block21
-
-endif-block21:                                    ; preds = %if-false-block23, %if-true-block22
-  %map_ptr24 = load i8*, i8** %0
-  store i32 0, i32* %loop_counter
-  store i32 0, i32* %loop_counter
-  br label %loop_begin
-
-loop_begin:                                       ; preds = %endif-block25, %endif-block21
-  %50 = load i32, i32* %loop_counter
-  %51 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %io, i32 %50
-  %52 = insertelement <8 x i32> undef, i32 %50, i32 0
-  %53 = shufflevector <8 x i32> %52, <8 x i32> undef, <8 x i32> zeroinitializer
-  %54 = add <8 x i32> %53, <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
-  %55 = icmp ult <8 x i32> %54, %9
-  %56 = sext <8 x i1> %55 to <8 x i32>
-  %57 = trunc <8 x i32> %56 to <8 x i1>
-  %58 = select <8 x i1> %57, <8 x i32> %54, <8 x i32> %9
-  br i1 %7, label %if-true-block26, label %if-false-block27
-
-if-true-block26:                                  ; preds = %loop_begin
-  %59 = shl <8 x i32> %58, <i32 2, i32 2, i32 2, i32 2, i32 2, i32 2, i32 2, i32 2>
-  %60 = bitcast i32* %fetch_elts to i8*
-  %61 = call <8 x i32> @llvm.x86.avx2.gather.d.d.256(<8 x i32> undef, i8* %60, <8 x i32> %59, <8 x i32> <i32 -1, i32 -1, i32 -1, i32 -1, i32 -1, i32 -1, i32 -1, i32 -1>, i8 1) #2
-  store <8 x i32> %61, <8 x i32>* %index_store
-  br label %endif-block25
-
-if-false-block27:                                 ; preds = %loop_begin
-  %62 = add <8 x i32> %58, %11
-  store <8 x i32> %62, <8 x i32>* %index_store
-  br label %endif-block25
-
-endif-block25:                                    ; preds = %if-false-block27, %if-true-block26
-  %63 = load <8 x i32>, <8 x i32>* %index_store
-  %64 = insertelement <8 x i32> undef, i32 %14, i32 0
-  %65 = shufflevector <8 x i32> %64, <8 x i32> undef, <8 x i32> zeroinitializer
-  %66 = insertelement <8 x i32> undef, i32 %22, i32 0
-  %67 = shufflevector <8 x i32> %66, <8 x i32> undef, <8 x i32> zeroinitializer
-  %68 = mul <8 x i32> %65, %63
- 
-  %490 = bitcast float* %489 to <4 x float>*
-  store <4 x float> %473, <4 x float>* %490, align 4
-  %.data_ptr120 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %482, i32 0, i32 2
-  %491 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr120, i32 0, i32 2, i32 0
-  %492 = bitcast float* %491 to <4 x float>*
-  store <4 x float> %474, <4 x float>* %492, align 4
-  %.data_ptr121 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %483, i32 0, i32 2
-  %493 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr121, i32 0, i32 2, i32 0
-  %494 = bitcast float* %493 to <4 x float>*
-  store <4 x float> %475, <4 x float>* %494, align 4
-  %.data_ptr122 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %484, i32 0, i32 2
-  %495 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr122, i32 0, i32 2, i32 0
-  %496 = bitcast float* %495 to <4 x float>*
-  store <4 x float> %476, <4 x float>* %496, align 4
-  %.data_ptr123 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %485, i32 0, i32 2
-  %497 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr123, i32 0, i32 2, i32 0
-  %498 = bitcast float* %497 to <4 x float>*
-  store <4 x float> %477, <4 x float>* %498, align 4
-  %.data_ptr124 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %486, i32 0, i32 2
-  %499 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr124, i32 0, i32 2, i32 0
-  %500 = bitcast float* %499 to <4 x float>*
-  store <4 x float> %478, <4 x float>* %500, align 4
-  %.data_ptr125 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %487, i32 0, i32 2
-  %501 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr125, i32 0, i32 2, i32 0
-  %502 = bitcast float* %501 to <4 x float>*
-  store <4 x float> %479, <4 x float>* %502, align 4
-  %.data_ptr126 = getelementptr { i32, [4 x float], [3 x [4 x float]] }, { i32, [4 x float], [3 x [4 x float]] }* %488, i32 0, i32 2
-  %503 = getelementptr [3 x [4 x float]], [3 x [4 x float]]* %.data_ptr126, i32 0, i32 2, i32 0
-  %504 = bitcast float* %503 to <4 x float>*
-  store <4 x float> %480, <4 x float>* %504, align 4
-  %505 = add i32 %50, 8
-  store i32 %505, i32* %loop_counter
-  %506 = icmp uge i32 %505, %count
-  br i1 %506, label %loop_end, label %loop_begin
-
-loop_end:                                         ; preds = %endif-block25
-  %507 = load i32, i32* %loop_counter
-  %508 = load <8 x i32>, <8 x i32>* %4
-  %509 = bitcast <8 x i32> %508 to i256
-  %510 = icmp ne i256 %509, 0
-  %511 = zext i1 %510 to i8
-  ret i8 %511
-}
-
-   1 debug_get_bool_option: SWRAST_NO_PRESENT = FALSE
-   2 debug_get_option: GALLIUM_DRIVER = llvmpipe
-   3 debug_get_bool_option: GALLIUM_DUMP_CPU = FALSE
-   4 debug_get_flags_option: LP_DEBUG = 0x0 (1)
-   5 debug_get_flags_option: LP_PERF = 0x0
-   6 debug_get_flags_option: GALLIVM_DEBUG = 0x3 (tgsi,ir)
-   7 debug_get_flags_option: GALLIVM_PERF = 0x0
-   8 debug_get_bool_option: LP_FORCE_SSE2 = FALSE
-   9 debug_get_num_option: LP_NATIVE_VECTOR_WIDTH = 256
-  10 debug_get_num_option: LP_NUM_THREADS = 12
-  11 debug_get_bool_option: LP_NO_RAST = FALSE
-  12 debug_get_bool_option: DRAW_USE_LLVM = TRUE 
-
-
-
-
