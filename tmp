@@ -1337,3 +1337,18 @@ typedef void (GLAPIENTRYP _glptr_Clear)(GLbitfield);
 static inline _glptr_Clear GET_Clear(struct _glapi_table *disp) {
    return (_glptr_Clear) (GET_by_offset(disp, _gloffset_Clear));
 }
+
+
+
+(gdb) dis
+disable      disassemble  disconnect   display      
+(gdb) disassemble 
+Dump of assembler code for function glClear:
+=> 0x00007ffff7f91c60 <+0>:                                                                                                                                                                               mov    0x27381(%rip),%rax        # 0x7ffff7fb8fe8
+   0x00007ffff7f91c67 <+7>:                                                                                                                                                                               mov    %fs:(%rax),%r11
+   0x00007ffff7f91c6b <+11>:                                                                                                                                                                              jmp    *0x658(%r11)
+   0x00007ffff7f91c72 <+18>:                                                                                                                                                                              data16 cs nopw 0x0(%rax,%rax,1)
+   0x00007ffff7f91c7d <+29>:                                                                                                                                                                              nopl   (%rax)
+End of assembler dump.
+
+glapi_x86-64.S
