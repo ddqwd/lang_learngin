@@ -1352,3 +1352,24 @@ Dump of assembler code for function glClear:
 End of assembler dump.
 
 glapi_x86-64.S
+~
+(gdb) disassemble 
+Dump of assembler code for function glClear:
+=> 0x00007ffff7fa5240 <+0>:	mov    0x26da1(%rip),%rax        # 0x7ffff7fcbfe8
+   0x00007ffff7fa5247 <+7>:	mov    %fs:(%rax),%r11
+   0x00007ffff7fa524b <+11>:	nop
+   0x00007ffff7fa524c <+12>:	jmpq   *0x658(%r11)
+   0x00007ffff7fa5253 <+19>:	data16 nopw %cs:0x0(%rax,%rax,1)
+   0x00007ffff7fa525e <+30>:	xchg   %ax,%ax
+
+
+* in bridge mode, mapi is a user of glapi */
+ 42 #ifdef MAPI_MODE_BRIDGE
+ 43 #define ENTRY_CURRENT_TABLE_GET "_glapi_get_dispatch"
+ 44 #else
+ 45 #define ENTRY_CURRENT_TABLE_GET U_STRINGIFY(u_current_get_table_internal)
+ 46 #
+
+
+
+The
